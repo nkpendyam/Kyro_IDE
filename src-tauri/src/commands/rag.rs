@@ -20,6 +20,7 @@ pub struct RagIndexStatus {
 
 /// Search result from RAG
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RagSearchResult {
     pub file_path: String,
     pub content: String,
@@ -27,6 +28,10 @@ pub struct RagSearchResult {
     pub line_start: u32,
     pub line_end: u32,
     pub context: String,
+    pub source: String,
+    pub graph_score: Option<f32>,
+    pub graph_distance: Option<u32>,
+    pub neighbors: Vec<String>,
 }
 
 /// Index request
@@ -39,11 +44,13 @@ pub struct IndexRequest {
 
 /// Search request
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchRequest {
     pub query: String,
     pub max_results: Option<u32>,
     pub file_filter: Option<Vec<String>>,
     pub min_score: Option<f32>,
+    pub graph_mode: Option<crate::rag::graph_rag::GraphSearchMode>,
 }
 
 /// RAG configuration
@@ -396,6 +403,10 @@ pub async fn semantic_search(
                 line_start: chunk.line_start,
                 line_end: chunk.line_end,
                 context,
+                source: "direct".to_string(),
+                graph_score: None,
+                graph_distance: None,
+                neighbors: Vec::new(),
             }
         })
         .collect();
@@ -465,7 +476,7 @@ pub async fn graph_enhanced_semantic_search(
     request: SearchRequest,
     rag_state: State<'_, Arc<RwLock<RagState>>>,
 ) -> Result<Vec<crate::rag::graph_rag::GraphSearchResult>, String> {
-    use crate::rag::graph_rag::graph_enhanced_search;
+    use crate::rag::graph_rag::{graph_enhanced_search, GraphSearchMode};
 
     // 1. Run standard BM25 search
     let rag = rag_state.read().await;
@@ -532,6 +543,7 @@ pub async fn graph_enhanced_semantic_search(
     };
     drop(wiki_guard);
 
-    let results = graph_enhanced_search(bm25_results, &graph, max);
+    let mode = request.graph_mode.unwrap_or(GraphSearchMode::Local);
+    let results = graph_enhanced_search(bm25_results, &graph, max, mode);
     Ok(results)
 }

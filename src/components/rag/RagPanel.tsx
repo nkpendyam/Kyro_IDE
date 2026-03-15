@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Search, Database, Trash2, FileText, Loader2 } from 'lucide-react';
+import { Search, Database, Trash2, FileText, Loader2, Network, Orbit, Globe2 } from 'lucide-react';
+
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 interface RagIndexStatus {
   indexed_files: number;
@@ -18,7 +20,14 @@ interface RagSearchResult {
   score: number;
   line_start: number;
   line_end: number;
+  context: string;
+  source: string;
+  graph_score?: number | null;
+  graph_distance?: number | null;
+  neighbors?: string[];
 }
+
+type GraphMode = 'local' | 'drift' | 'global';
 
 export function RagPanel() {
   const [status, setStatus] = useState<RagIndexStatus | null>(null);
@@ -26,6 +35,7 @@ export function RagPanel() {
   const [results, setResults] = useState<RagSearchResult[]>([]);
   const [projectPath, setProjectPath] = useState('');
   const [loading, setLoading] = useState(false);
+  const [graphMode, setGraphMode] = useState<GraphMode>('local');
 
   useEffect(() => {
     invoke<RagIndexStatus>('get_rag_status').then(setStatus).catch(() => {});
@@ -46,11 +56,18 @@ export function RagPanel() {
     if (!searchQuery) return;
     setLoading(true);
     try {
-      const r = await invoke<RagSearchResult[]>('semantic_search', {
-        request: { query: searchQuery, max_results: 10 }
+      const command = graphMode === 'local' ? 'graph_enhanced_semantic_search' : 'graph_enhanced_semantic_search';
+      const r = await invoke<RagSearchResult[]>(command, {
+        request: { query: searchQuery, maxResults: 10, graphMode }
       });
       setResults(r);
     } finally { setLoading(false); }
+  };
+
+  const sourceLabel: Record<string, string> = {
+    direct: 'Direct hit',
+    graphNeighbor: 'Graph neighbor',
+    community: 'Community summary',
   };
 
   return (
@@ -106,15 +123,53 @@ export function RagPanel() {
           className="px-4 py-2 bg-[#58a6ff] text-white text-sm rounded">Search</button>
       </div>
 
+      <div className="mb-4 rounded border border-[#30363d] bg-[#161b22] p-3">
+        <div className="mb-2 flex items-center gap-2 text-sm text-[#c9d1d9]">
+          <Network size={15} /> GraphRAG Mode
+        </div>
+        <ToggleGroup
+          type="single"
+          value={graphMode}
+          onValueChange={(value) => {
+            if (value === 'local' || value === 'drift' || value === 'global') {
+              setGraphMode(value);
+            }
+          }}
+          className="grid grid-cols-3 gap-2"
+        >
+          <ToggleGroupItem value="local" className="gap-2 border border-[#30363d] data-[state=on]:bg-[#1f6feb] data-[state=on]:text-white">
+            <FileText size={14} /> Local
+          </ToggleGroupItem>
+          <ToggleGroupItem value="drift" className="gap-2 border border-[#30363d] data-[state=on]:bg-[#238636] data-[state=on]:text-white">
+            <Orbit size={14} /> Drift
+          </ToggleGroupItem>
+          <ToggleGroupItem value="global" className="gap-2 border border-[#30363d] data-[state=on]:bg-[#8957e5] data-[state=on]:text-white">
+            <Globe2 size={14} /> Global
+          </ToggleGroupItem>
+        </ToggleGroup>
+        <p className="mt-2 text-xs text-[#8b949e]">
+          Local follows dependency neighbors, Drift expands broader graph context, and Global boosts structurally central files.
+        </p>
+      </div>
+
       <div className="flex-1 overflow-auto space-y-2">
         {results.map((r, i) => (
           <div key={i} className="bg-[#161b22] border border-[#30363d] rounded p-3">
-            <div className="flex justify-between mb-1">
+            <div className="mb-1 flex justify-between gap-3">
               <span className="text-[#58a6ff] text-sm">{r.file_path}</span>
               <span className="text-[#3fb950] text-xs">{(r.score * 100).toFixed(0)}%</span>
             </div>
-            <p className="text-xs text-[#8b949e]">Lines {r.line_start}-{r.line_end}</p>
-            <pre className="text-sm text-[#c9d1d9] bg-[#0d1117] p-2 rounded mt-2">{r.content}</pre>
+            <div className="mb-2 flex flex-wrap gap-2 text-xs text-[#8b949e]">
+              <span>Lines {r.line_start}-{r.line_end}</span>
+              <span>{sourceLabel[r.source] ?? r.source}</span>
+              {typeof r.graph_score === 'number' ? <span>Graph {(r.graph_score * 100).toFixed(0)}%</span> : null}
+              {typeof r.graph_distance === 'number' ? <span>{r.graph_distance} hops</span> : null}
+            </div>
+            <p className="text-xs text-[#8b949e] whitespace-pre-wrap">{r.context}</p>
+            {r.neighbors && r.neighbors.length > 0 ? (
+              <p className="mt-2 text-xs text-[#8b949e]">Neighbors: {r.neighbors.join(', ')}</p>
+            ) : null}
+            <pre className="text-sm text-[#c9d1d9] bg-[#0d1117] p-2 rounded mt-2 whitespace-pre-wrap">{r.content || 'Graph-derived result without direct chunk content.'}</pre>
           </div>
         ))}
       </div>
