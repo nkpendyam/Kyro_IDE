@@ -722,6 +722,7 @@ fn main() {
             // ============ Settings Persistence ============
             commands::settings::get_settings,
             commands::settings::set_setting,
+            commands::settings::save_settings,
             commands::settings::reset_settings,
             commands::settings::export_settings,
             commands::settings::import_settings,
@@ -751,6 +752,11 @@ fn main() {
             commands::repowiki::repowiki_get_mermaid,
             commands::repowiki::repowiki_graph_stats,
             commands::repowiki::repowiki_list_pages,
+            // ============ Autonomous Execution ============
+            commands::autonomous::execute_step,
+            commands::autonomous::execute_plan,
+            commands::autonomous::plan_task,
+            commands::autonomous::autonomous_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useExtendedKyroStore } from '@/store/extendedStore';
 import { useKyroStore } from '@/store/kyroStore';
 import { invoke } from '@tauri-apps/api/core';
@@ -28,6 +28,29 @@ export function SettingsPanel() {
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Load settings from backend on mount
+  useEffect(() => {
+    invoke<Record<string, unknown>>('get_settings')
+      .then((saved) => {
+        updateSettings({
+          fontSize: typeof saved.fontSize === 'number' ? saved.fontSize : 14,
+          tabSize: typeof saved.tabSize === 'number' ? saved.tabSize : 4,
+          wordWrap: typeof saved.wordWrap === 'boolean' ? saved.wordWrap : true,
+          minimap: typeof saved.minimap === 'boolean' ? saved.minimap : true,
+          formatOnSave: typeof saved.formatOnSave === 'boolean' ? saved.formatOnSave : false,
+          autoSave: typeof saved.autoSave === 'boolean' ? saved.autoSave : true,
+          autoSaveDelay: typeof saved.autoSaveDelay === 'number' ? saved.autoSaveDelay : 1000,
+        });
+        const savedTheme = saved.theme as string | undefined;
+        if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
+          setTheme(savedTheme);
+        }
+      })
+      .catch(() => {
+        // Backend unavailable (web mode) — keep store defaults
+      });
+  }, [updateSettings, setTheme]);
+
   const matchesSearch = useCallback((terms: string[]) => {
     if (!searchQuery.trim()) return true;
     const query = searchQuery.trim().toLowerCase();
@@ -52,13 +75,15 @@ export function SettingsPanel() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      // Persist each setting to the backend
-      for (const [key, value] of Object.entries(settings)) {
-        await invoke('set_setting', { key, value: JSON.stringify(value) });
-      }
+      // Persist entire settings object atomically via save_settings
+      const payload: Record<string, unknown> = {
+        ...settings,
+        theme,
+      };
+      await invoke('save_settings', { settings: payload });
     } catch {
       // Fallback: save to localStorage if backend unavailable
-      localStorage.setItem('kro-settings', JSON.stringify(settings));
+      localStorage.setItem('kyro-settings', JSON.stringify({ ...settings, theme }));
     }
     setSaving(false);
   };

@@ -97,3 +97,6 @@ pub mod testing;
 
 // ============ RepoWiki Operations ============
 pub mod repowiki;
+
+// ============ Autonomous Execution ============
+pub mod autonomous;

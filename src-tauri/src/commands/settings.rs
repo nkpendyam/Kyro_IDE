@@ -128,6 +128,15 @@ pub fn import_settings(json_str: String) -> Result<serde_json::Value, String> {
     Ok(merged)
 }
 
+/// Save the entire settings object atomically (replaces per-key set_setting for bulk saves)
+#[command]
+pub fn save_settings(settings: serde_json::Value) -> Result<serde_json::Value, String> {
+    let defaults = default_settings();
+    let merged = merge_json(&defaults, &settings);
+    write_settings(&merged)?;
+    Ok(merged)
+}
+
 /// Check if first run has been completed
 #[command]
 pub fn is_first_run() -> Result<bool, String> {
