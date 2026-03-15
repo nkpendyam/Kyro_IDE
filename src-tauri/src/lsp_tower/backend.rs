@@ -59,8 +59,31 @@ impl KyroLspBackend {
     /// Send a custom notification via log messages for now
     /// Custom notifications require implementing the Notification trait properly
     pub async fn send_notification(&self, method: &str, params: serde_json::Value) {
-        log::info!("Notification: {} - {:?}", method, params);
-        // TODO: Implement proper custom notifications when needed
+        let payload = match serde_json::to_string(&params) {
+            Ok(s) => s,
+            Err(_) => "{}".to_string(),
+        };
+
+        match method {
+            "window/showError" => {
+                self.client
+                    .show_message(MessageType::ERROR, payload)
+                    .await;
+            }
+            "window/showWarning" => {
+                self.client
+                    .show_message(MessageType::WARNING, payload)
+                    .await;
+            }
+            "window/showInfo" => {
+                self.client.show_message(MessageType::INFO, payload).await;
+            }
+            _ => {
+                self.client
+                    .log_message(MessageType::LOG, format!("{}: {}", method, payload))
+                    .await;
+            }
+        }
     }
 }
 

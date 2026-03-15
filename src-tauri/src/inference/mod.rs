@@ -732,8 +732,40 @@ impl InferenceEngine {
 /// Embedding generation
 impl InferenceEngine {
     /// Generate embeddings for text
-    pub async fn embed(&self, _text: &str) -> Result<Vec<f32>> {
-        // Placeholder: would use embedding model
-        Ok(vec![0.0; 768])
+    pub async fn embed(&self, text: &str) -> Result<Vec<f32>> {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let dim = 768usize;
+        let mut embedding = vec![0.0f32; dim];
+
+        // Deterministic token hashing for lightweight local embeddings.
+        // Uses signed projection into the embedding space, then L2 normalize.
+        let tokens: Vec<String> = text
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+
+        for token in tokens {
+            let mut hasher = DefaultHasher::new();
+            token.hash(&mut hasher);
+            let h = hasher.finish();
+
+            let index = (h as usize) % dim;
+            let sign = if (h >> 63) == 0 { 1.0f32 } else { -1.0f32 };
+            let magnitude = (((h >> 32) as u32) as f32 / u32::MAX as f32).max(0.01);
+            embedding[index] += sign * magnitude;
+        }
+
+        let norm = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm > 0.0 {
+            for value in &mut embedding {
+                *value /= norm;
+            }
+        }
+
+        Ok(embedding)
     }
 }

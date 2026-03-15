@@ -814,13 +814,34 @@ fn detect_gpu() -> (Option<String>, u64, String, embedded_llm::MemoryTier) {
     // Try CUDA first
     #[cfg(feature = "cuda")]
     {
-        // Would query CUDA
-        return (
-            Some("NVIDIA GPU".to_string()),
-            8_589_934_592,
-            "cuda".to_string(),
-            embedded_llm::MemoryTier::Medium8GB,
-        );
+        use std::process::Command;
+
+        if let Ok(output) = Command::new("nvidia-smi")
+            .args([
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ])
+            .output()
+        {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Some(line) = stdout.lines().next() {
+                    let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+                    if parts.len() >= 2 {
+                        if let Ok(mem_mb) = parts[1].parse::<u64>() {
+                            let vram_bytes = mem_mb * 1024 * 1024;
+                            let tier = embedded_llm::MemoryTier::from_vram(vram_bytes);
+                            return (
+                                Some(parts[0].to_string()),
+                                vram_bytes,
+                                "cuda".to_string(),
+                                tier,
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Try Metal on macOS
