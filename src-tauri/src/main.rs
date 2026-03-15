@@ -394,6 +394,10 @@ fn main() {
             app.manage(Arc::new(Mutex::new(debug_state)));
             log::info!("✓ Debug state initialized");
 
+            // ============ Initialize Remote Dev Environment State ============
+            app.manage(commands::remote::RemoteState::default());
+            log::info!("✓ Remote dev environment state initialized");
+
             // ============ Startup Complete ============
 
             log::info!("=================================");
@@ -757,6 +761,9 @@ fn main() {
             commands::autonomous::execute_plan,
             commands::autonomous::plan_task,
             commands::autonomous::autonomous_status,
+            // ============ Remote Dev Environments ============
+            commands::remote::remote_connect,
+            commands::remote::remote_disconnect,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

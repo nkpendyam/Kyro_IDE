@@ -127,13 +127,82 @@ impl OnboardingManager {
 
         #[cfg(target_os = "windows")]
         {
-            // Would query DXGI for NVIDIA/AMD
-            // Placeholder
+            // Query NVIDIA GPU via nvidia-smi (fastest, accurate VRAM)
+            if let Ok(out) = std::process::Command::new("nvidia-smi")
+                .args(["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
+                .output()
+            {
+                if out.status.success() {
+                    let text = String::from_utf8_lossy(&out.stdout);
+                    let line = text.lines().next().unwrap_or("");
+                    let parts: Vec<&str> = line.splitn(2, ',').collect();
+                    if parts.len() == 2 {
+                        let name = parts[0].trim().to_string();
+                        let vram_mb: u64 = parts[1].trim().parse().unwrap_or(0);
+                        return (Some(name), vram_mb, false, true);
+                    }
+                }
+            }
+            // Fall back to wmic for non-NVIDIA (AMD / Intel Arc)
+            if let Ok(out) = std::process::Command::new("wmic")
+                .args(["path", "win32_VideoController", "get", "name,AdapterRAM", "/format:csv"])
+                .output()
+            {
+                if out.status.success() {
+                    let text = String::from_utf8_lossy(&out.stdout);
+                    // CSV line format: Node,AdapterRAM,Name
+                    for line in text.lines().skip(1) {
+                        let parts: Vec<&str> = line.splitn(3, ',').collect();
+                        if parts.len() == 3 {
+                            let vram_bytes: u64 = parts[1].trim().parse().unwrap_or(0);
+                            let name = parts[2].trim().to_string();
+                            if !name.is_empty() && vram_bytes > 0 {
+                                let vram_mb = vram_bytes / 1024 / 1024;
+                                let has_cuda = name.to_ascii_lowercase().contains("nvidia");
+                                return (Some(name), vram_mb, false, has_cuda);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         #[cfg(target_os = "linux")]
         {
-            // Would check /sys/class/drm for GPU info
+            // Try nvidia-smi first
+            if let Ok(out) = std::process::Command::new("nvidia-smi")
+                .args(["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
+                .output()
+            {
+                if out.status.success() {
+                    let text = String::from_utf8_lossy(&out.stdout);
+                    let line = text.lines().next().unwrap_or("");
+                    let parts: Vec<&str> = line.splitn(2, ',').collect();
+                    if parts.len() == 2 {
+                        let name = parts[0].trim().to_string();
+                        let vram_mb: u64 = parts[1].trim().parse().unwrap_or(0);
+                        return (Some(name), vram_mb, false, true);
+                    }
+                }
+            }
+            // Fall back to sysfs for AMD/Intel
+            let drm_paths = [
+                "/sys/class/drm/card0/device/mem_info_vram_total",
+                "/sys/class/drm/card1/device/mem_info_vram_total",
+            ];
+            for path in &drm_paths {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    if let Ok(bytes) = content.trim().parse::<u64>() {
+                        let vram_mb = bytes / 1024 / 1024;
+                        if vram_mb > 0 {
+                            let name = std::fs::read_to_string(
+                                path.replace("mem_info_vram_total", "vendor")
+                            ).unwrap_or_default();
+                            return (Some(name.trim().to_string()), vram_mb, false, false);
+                        }
+                    }
+                }
+            }
         }
 
         (None, 0, false, false)

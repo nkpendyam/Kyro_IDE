@@ -100,3 +100,6 @@ pub mod repowiki;
 
 // ============ Autonomous Execution ============
 pub mod autonomous;
+
+// ============ Remote Dev Environments ============
+pub mod remote;
