@@ -158,7 +158,7 @@ export function CodeEditor({ onSave, roomId, currentUserId }: CodeEditorProps) {
 
   if (!currentFile) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-[#8b949e]">
+      <div data-testid="editor-container" className="h-full flex flex-col items-center justify-center text-[#8b949e]">
         <p className="text-lg mb-2">No file open</p>
         <p className="text-xs">Select a file from explorer or press Ctrl+P</p>
       </div>
@@ -200,7 +200,7 @@ export function CodeEditor({ onSave, roomId, currentUserId }: CodeEditorProps) {
   };
 
   return (
-    <div className="h-full flex flex-col overflow-hidden" ref={containerRef}>
+    <div data-testid="editor-container" className="h-full flex flex-col overflow-hidden" ref={containerRef}>
       <div className="h-8 bg-[#161b22] border-b border-[#30363d] flex items-center px-2 text-xs text-[#8b949e]">
         <MinimapToggle visible={minimapVisible} onToggle={() => setMinimapVisible(!minimapVisible)} />
         <button

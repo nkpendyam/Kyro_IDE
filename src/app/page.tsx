@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { useKyroStore, FileNode, OpenFile } from '@/store/kyroStore';
 import { useExtendedKyroStore } from '@/store/extendedStore';
 import { AgentManagerPanel } from '@/components/agent-manager/AgentManagerPanel';
@@ -33,7 +34,6 @@ import { DiffViewer } from '@/components/git/DiffViewer';
 import { ModelSelector } from '@/components/chat/ModelSelector';
 import { TerminalAI } from '@/components/terminal/TerminalAI';
 import { ProjectRules } from '@/components/settings/ProjectRules';
-import { CodeEditor } from '@/components/editor/CodeEditor';
 import { AccessiblePanel, AccessibleButton } from '@/components/accessibility/AccessibilityProvider';
 import { AgentAutopilotPanel } from '@/components/agents/AgentAutopilotPanel';
 import { ConversationCheckpoints, Checkpoint } from '@/components/chat/ConversationCheckpoints';
@@ -90,8 +90,14 @@ const fallbackFileTree: FileNode = {
   ]
 };
 
+const CodeEditor = dynamic(
+  () => import('@/components/editor/CodeEditor').then((module) => module.CodeEditor),
+  { ssr: false }
+);
+
 // Main IDE Page
 export default function Home() {
+  const [isClientMounted, setIsClientMounted] = useState(false);
   const [viewMode, setViewMode] = useState<'editor' | 'mission'>('editor');
   const [activePanel, setActivePanel] = useState<SidebarPanel>('explorer');
   const [showChat, setShowChat] = useState(true);
@@ -122,6 +128,10 @@ export default function Home() {
     chatMessages,
     settings,
   } = useKyroStore();
+
+  useEffect(() => {
+    setIsClientMounted(true);
+  }, []);
 
   // Initialize: try Tauri file tree, fall back to mock data
   React.useEffect(() => {
@@ -329,6 +339,10 @@ export default function Home() {
     }
   }, [handleFileClick]);
 
+  if (!isClientMounted) {
+    return <div className="h-screen bg-[#0d1117]" />;
+  }
+
   return (
     <AccessiblePanel id="main-content" title="Kyro IDE Main Workspace">
     <div className="h-screen flex flex-col bg-[#0d1117] text-[#c9d1d9] overflow-hidden"
@@ -390,7 +404,7 @@ export default function Home() {
       ) : (
         <div className="flex-1 flex overflow-hidden">
           {/* Activity Bar */}
-          <div className="w-12 bg-[#0d1117] border-r border-[#30363d] flex flex-col items-center py-2">
+          <div data-testid="activity-bar" className="w-12 bg-[#0d1117] border-r border-[#30363d] flex flex-col items-center py-2">
             {[
               { id: 'explorer' as SidebarPanel, icon: Files, label: 'Explorer' },
               { id: 'search' as SidebarPanel, icon: Search, label: 'Search' },
@@ -466,7 +480,7 @@ export default function Home() {
                 {activePanel === 'remote' && 'Remote / Containers'}
               </span>
             </div>
-            <div className="flex-1 overflow-y-auto">
+            <div data-testid="file-tree" className="flex-1 overflow-y-auto">
               {activePanel === 'explorer' && (
                 <div className="py-1">
                   <div className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-[#8b949e]">

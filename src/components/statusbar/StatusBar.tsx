@@ -59,7 +59,7 @@ export function StatusBar() {
   const modelStatus = getModelStatus();
 
   return (
-    <div className="h-6 bg-[#161b22] border-t border-[#30363d] flex items-center px-2 justify-between text-xs">
+    <div data-testid="status-bar" className="h-6 bg-[#161b22] border-t border-[#30363d] flex items-center px-2 justify-between text-xs">
       <div className="flex items-center gap-3">
         {gitStatus && (
           <div className="flex items-center gap-1 text-[#8b949e]">
@@ -129,7 +129,7 @@ export function StatusBar() {
         
         {/* File Language */}
         {currentFile && (
-          <span className="text-[#8b949e]">
+          <span data-testid="language-indicator" className="text-[#8b949e]">
             {currentFile.language.toUpperCase()}
           </span>
         )}

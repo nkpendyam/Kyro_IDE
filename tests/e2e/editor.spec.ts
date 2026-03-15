@@ -8,6 +8,9 @@ import { test, expect, Page } from '@playwright/test';
 
 test.describe('Editor', () => {
   test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('kyro-first-run-done', 'true');
+    });
     await page.goto('/');
   });
 
@@ -110,6 +113,9 @@ test.describe('Editor', () => {
 
 test.describe('Editor - Keyboard Shortcuts', () => {
   test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('kyro-first-run-done', 'true');
+    });
     await page.goto('/');
   });
 
@@ -147,6 +153,9 @@ test.describe('Editor - Keyboard Shortcuts', () => {
 test.describe('Editor - Performance', () => {
   test('should load within acceptable time', async ({ page }) => {
     const startTime = Date.now();
+    await page.addInitScript(() => {
+      window.localStorage.setItem('kyro-first-run-done', 'true');
+    });
     await page.goto('/');
     
     // Wait for main content
@@ -162,6 +171,9 @@ test.describe('Editor - Performance', () => {
   });
 
   test('should handle multiple rapid clicks', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('kyro-first-run-done', 'true');
+    });
     await page.goto('/');
     await page.waitForTimeout(1000);
     
