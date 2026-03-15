@@ -54,6 +54,8 @@ pub struct ExtensionHost {
     context: Arc<RwLock<HostContext>>,
     /// Node.js subprocess for extension execution
     node_process: Option<Child>,
+    /// Stdin writer for sending RPC messages to extension host
+    node_stdin: Option<std::io::BufWriter<std::process::ChildStdin>>,
     /// RPC pending requests
     pending_requests: Arc<AsyncRwLock<HashMap<u64, oneshot::Sender<Result<Value>>>>>,
     /// Request ID counter
@@ -130,6 +132,7 @@ impl ExtensionHost {
             activated_extensions: HashMap::new(),
             context: Arc::new(RwLock::new(HostContext::default())),
             node_process: None,
+            node_stdin: None,
             pending_requests: Arc::new(AsyncRwLock::new(HashMap::new())),
             request_id: Arc::new(RwLock::new(0)),
             is_ready: Arc::new(RwLock::new(false)),
@@ -167,7 +170,8 @@ impl ExtensionHost {
             .spawn()
             .context("Failed to start extension host process")?;
 
-        let _stdin = child.stdin.take().context("Failed to get stdin")?;
+        let stdin = child.stdin.take().context("Failed to get stdin")?;
+        self.node_stdin = Some(std::io::BufWriter::new(stdin));
         let stdout = child.stdout.take().context("Failed to get stdout")?;
 
         // Start message pump
@@ -504,6 +508,39 @@ sendNotification('host/ready', {});
         }
     }
 
+    /// Write a JSON-RPC message to the extension host stdin.
+    fn write_rpc(&mut self, method: &str, params: Value) {
+        if !*self.is_ready.read() {
+            return;
+        }
+
+        let message = json!({
+            "method": method,
+            "params": params,
+        });
+
+        if let Some(stdin) = self.node_stdin.as_mut() {
+            match serde_json::to_string(&message) {
+                Ok(line) => {
+                    if let Err(e) = stdin.write_all(line.as_bytes()) {
+                        log::warn!("Failed to write RPC message '{}': {}", method, e);
+                        return;
+                    }
+                    if let Err(e) = stdin.write_all(b"\n") {
+                        log::warn!("Failed to write RPC newline for '{}': {}", method, e);
+                        return;
+                    }
+                    if let Err(e) = stdin.flush() {
+                        log::warn!("Failed to flush RPC message '{}': {}", method, e);
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to serialize RPC message '{}': {}", method, e);
+                }
+            }
+        }
+    }
+
     /// Scan directory for extensions
     fn scan_extensions(&mut self, dir: &Path) -> Result<()> {
         if !dir.exists() {
@@ -591,13 +628,19 @@ sendNotification('host/ready', {});
 
         // Check activation events
         if self.should_activate(&manifest) {
-            // Send activate request to Node.js host
-            if *self.is_ready.read() {
-                if let Some(_process) = &mut self.node_process {
-                    // Would send RPC activate message here
-                    log::debug!("Activating extension via RPC: {}", extension_id);
-                }
-            }
+            let extension_path = self
+                .extensions
+                .get(extension_id)
+                .map(|ext| ext.extension_path.to_string_lossy().to_string())
+                .unwrap_or_default();
+            self.write_rpc(
+                "extension/activate",
+                json!({
+                    "id": extension_id,
+                    "extensionPath": extension_path,
+                }),
+            );
+            log::debug!("Activating extension via RPC: {}", extension_id);
 
             if let Some(extension) = self.extensions.get_mut(extension_id) {
                 extension.state = ExtensionState::Active;
@@ -653,13 +696,20 @@ sendNotification('host/ready', {});
 
     /// Deactivate an extension
     pub fn deactivate_extension(&mut self, extension_id: &str) -> Result<()> {
-        let extension = self
+        let current_state = self
             .extensions
-            .get_mut(extension_id)
-            .ok_or_else(|| anyhow::anyhow!("Extension not found: {}", extension_id))?;
+            .get(extension_id)
+            .ok_or_else(|| anyhow::anyhow!("Extension not found: {}", extension_id))?
+            .state
+            .clone();
 
-        if extension.state == ExtensionState::Active {
-            // Would send deactivate RPC here
+        if current_state == ExtensionState::Active {
+            self.write_rpc("extension/deactivate", json!({ "id": extension_id }));
+
+            let extension = self
+                .extensions
+                .get_mut(extension_id)
+                .ok_or_else(|| anyhow::anyhow!("Extension not found: {}", extension_id))?;
             extension.state = ExtensionState::Inactive;
             self.activated_extensions.remove(extension_id);
             extension.subscriptions.clear();
@@ -709,11 +759,17 @@ sendNotification('host/ready', {});
                     self.activate_extension(&ext_id)?;
                 }
 
-                // Would send RPC to execute command
+                self.write_rpc(
+                    "command/execute",
+                    json!({
+                        "id": command_id,
+                        "args": args,
+                    }),
+                );
                 Ok(Some(json!({
                     "command": command_id,
                     "args": args,
-                    "result": "executed"
+                    "result": "dispatched"
                 })))
             }
             None => Err(anyhow::anyhow!("Command not found: {}", command_id)),

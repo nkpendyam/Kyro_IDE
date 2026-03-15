@@ -351,15 +351,67 @@ impl Validator for SemanticValidator {
 }
 
 // Helper functions
-fn check_syntax(code: &str, _language: &str) -> Vec<String> {
-    // Would use tree-sitter in real impl
+fn check_syntax(code: &str, language: &str) -> Vec<String> {
+    // Try tree-sitter for supported languages
+    let ts_lang: Option<tree_sitter::Language> = match language {
+        "rust" => Some(tree_sitter_rust::LANGUAGE.into()),
+        "typescript" | "tsx" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
+        "javascript" | "jsx" => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
+        "python" => Some(tree_sitter_python::LANGUAGE.into()),
+        "go" => Some(tree_sitter_go::LANGUAGE.into()),
+        "c" => Some(tree_sitter_c::LANGUAGE.into()),
+        "cpp" | "c++" => Some(tree_sitter_cpp::LANGUAGE.into()),
+        "java" => Some(tree_sitter_java::LANGUAGE.into()),
+        _ => None,
+    };
+
+    if let Some(lang) = ts_lang {
+        let mut parser = tree_sitter::Parser::new();
+        if parser.set_language(&lang).is_ok() {
+            if let Some(tree) = parser.parse(code, None) {
+                if tree.root_node().has_error() {
+                    // Walk the tree and collect error positions
+                    let mut issues = Vec::new();
+                    let mut cursor = tree.root_node().walk();
+                    loop {
+                        let node = cursor.node();
+                        if node.is_error() || node.is_missing() {
+                            let row = node.start_position().row + 1;
+                            let col = node.start_position().column + 1;
+                            let desc = if node.is_missing() {
+                                format!("Missing token at line {}, col {}", row, col)
+                            } else {
+                                format!("Syntax error at line {}, col {}", row, col)
+                            };
+                            if !issues.contains(&desc) {
+                                issues.push(desc);
+                            }
+                        }
+                        if cursor.goto_first_child() {
+                            continue;
+                        }
+                        loop {
+                            if cursor.goto_next_sibling() {
+                                break;
+                            }
+                            if !cursor.goto_parent() {
+                                return issues;
+                            }
+                        }
+                    }
+                } else {
+                    return vec![];
+                }
+            }
+        }
+    }
+
+    // Fallback: bracket matching for unsupported languages
     let mut issues = Vec::new();
-    
-    // Simple bracket matching
-    let mut brackets = 0;
-    let mut braces = 0;
-    let mut parens = 0;
-    
+    let mut brackets = 0i32;
+    let mut braces = 0i32;
+    let mut parens = 0i32;
+
     for c in code.chars() {
         match c {
             '[' => brackets += 1,
@@ -371,17 +423,10 @@ fn check_syntax(code: &str, _language: &str) -> Vec<String> {
             _ => {}
         }
     }
-    
-    if brackets != 0 {
-        issues.push("Unmatched brackets".to_string());
-    }
-    if braces != 0 {
-        issues.push("Unmatched braces".to_string());
-    }
-    if parens != 0 {
-        issues.push("Unmatched parentheses".to_string());
-    }
-    
+
+    if brackets != 0 { issues.push("Unmatched brackets".to_string()); }
+    if braces != 0   { issues.push("Unmatched braces".to_string()); }
+    if parens != 0   { issues.push("Unmatched parentheses".to_string()); }
     issues
 }
 

@@ -70,11 +70,11 @@ impl WasmRuntime {
     pub fn deactivate(&mut self) -> Result<()> {
         #[cfg(feature = "wasm-plugins")]
         {
-            if let (Some(instance), Some(ref mut store)) =
-                (self.instance.take(), self.store.as_mut())
-            {
+            if let (Some(instance), Some(ref mut store)) = (&self.instance, self.store.as_mut()) {
                 // Call deactivate function if present
-                // Would need typed function call
+                if let Some(deactivate) = instance.get_typed_func::<(), ()>(&mut *store, "deactivate") {
+                    deactivate.call(&mut *store, ())?;
+                }
             }
         }
 

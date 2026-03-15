@@ -136,6 +136,8 @@ impl Embedder for HashEmbedder {
 pub struct TfIdfEmbedder {
     config: EmbeddingConfig,
     vocabulary: HashMap<String, usize>,
+    /// Number of documents each term appears in (indexed by vocabulary index)
+    document_frequencies: Vec<usize>,
     idf: Vec<f32>,
     document_count: usize,
     rust_stemmers: Option<rust_stemmers::Stemmer>,
@@ -149,6 +151,7 @@ impl TfIdfEmbedder {
         Self {
             config,
             vocabulary: HashMap::new(),
+            document_frequencies: Vec::new(),
             idf: Vec::new(),
             document_count: 0,
             rust_stemmers: stemmer,
@@ -181,9 +184,16 @@ impl TfIdfEmbedder {
             *term_counts.entry(token).or_insert(0) += 1;
         }
 
+        // Assign vocabulary indices and track document frequency
+        let new_vocab_size = self.vocabulary.len() + term_counts.len();
+        self.document_frequencies.resize(new_vocab_size, 0);
+
         for term in term_counts.keys() {
             let len = self.vocabulary.len();
-            self.vocabulary.entry(term.clone()).or_insert(len);
+            let idx = *self.vocabulary.entry(term.clone()).or_insert(len);
+            if idx < self.document_frequencies.len() {
+                self.document_frequencies[idx] += 1;
+            }
         }
 
         self.document_count += 1;
@@ -193,11 +203,13 @@ impl TfIdfEmbedder {
     }
 
     fn update_idf(&mut self) {
-        self.idf = vec![0.0; self.vocabulary.len()];
-        // Simplified IDF calculation
+        let vocab_size = self.vocabulary.len();
+        self.idf = vec![0.0; vocab_size];
         let n = self.document_count as f32 + 1.0;
-        for i in 0..self.vocabulary.len() {
-            self.idf[i] = (n / 2.0).ln(); // Placeholder
+        for i in 0..vocab_size {
+            let df = self.document_frequencies.get(i).copied().unwrap_or(0) as f32;
+            // Standard smoothed IDF: ln((N + 1) / (df + 1)) + 1
+            self.idf[i] = (n / (df + 1.0)).ln() + 1.0;
         }
     }
 
@@ -242,7 +254,6 @@ impl TfIdfEmbedder {
         tf
     }
 }
-
 impl Embedder for TfIdfEmbedder {
     fn embed(&self, text: &str) -> anyhow::Result<EmbeddingResult> {
         let start = std::time::Instant::now();

@@ -3,6 +3,7 @@
 //! Handles model discovery, download, and lifecycle management
 
 use super::*;
+use crate::inference::model as model_meta;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -183,6 +184,20 @@ impl ModelManager {
         // Parse quantization from filename
         let quantization = self.detect_quantization(&name);
 
+        let parsed_meta = model_meta::load_metadata(path).ok();
+        let trained_context = parsed_meta
+            .as_ref()
+            .map(|m| m.context_length as u32)
+            .unwrap_or(4096);
+        let parameters = parsed_meta
+            .as_ref()
+            .map(|m| m.num_layers as u64 * m.embedding_length as u64 * 12)
+            .unwrap_or(0);
+        let architecture = parsed_meta
+            .as_ref()
+            .map(|m| m.architecture.clone())
+            .unwrap_or_else(|| "llama".to_string());
+
         // Estimate tier from size
         let tier = MemoryTier::from_vram(size_bytes * 2); // Account for KV cache
 
@@ -191,9 +206,9 @@ impl ModelManager {
             path: path.to_string_lossy().to_string(),
             size_bytes,
             quantization,
-            trained_context: 4096, // Would parse from GGUF
-            parameters: 0,         // Would parse from GGUF
-            architecture: "llama".to_string(),
+            trained_context,
+            parameters,
+            architecture,
             hf_repo: None,
             sha256: None,
             url: None,
