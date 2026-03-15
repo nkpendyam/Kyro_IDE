@@ -16,7 +16,7 @@ kyro-core = { path = "../kyro-core" }
 tokio = { version = "1", features = ["full"] }
 
 # Git
-git2 = "0.18"
+git2 = "0.20"
 
 # Concurrency
 dashmap = "5.5"

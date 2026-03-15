@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import { AccessibilityProvider, SkipLink } from "@/components/accessibility/AccessibilityProvider";
+import { UpdaterProvider } from "@/components/updater/UpdaterProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -47,11 +48,13 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
         <ThemeProvider>
-          <AccessibilityProvider>
-            <SkipLink targetId="main-content" label="Skip to main workspace" />
-            {children}
-            <Toaster />
-          </AccessibilityProvider>
+          <UpdaterProvider>
+            <AccessibilityProvider>
+              <SkipLink targetId="main-content" label="Skip to main workspace" />
+              {children}
+              <Toaster />
+            </AccessibilityProvider>
+          </UpdaterProvider>
         </ThemeProvider>
       </body>
     </html>

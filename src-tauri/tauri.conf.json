@@ -28,6 +28,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -70,6 +71,15 @@
   "plugins": {
     "shell": {
       "open": true
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU4Q0RDNDdGQ0VFMkM2NDYKUldSR3h1TE9mOFRONkFyOFF1aStNNUZHRjAwMWpPdTFPZ0ZTcTRSdXFOTmY4VWF1QXdQV3JxUzEK",
+      "endpoints": [
+        "https://github.com/nkpendyam/Kyro_IDE/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

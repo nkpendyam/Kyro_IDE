@@ -1,240 +1,148 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Download, RefreshCw, Check, X, Clock, ArrowUp, Info } from 'lucide-react';
+import { ArrowUp, Check, Download, Info, RefreshCw } from 'lucide-react';
 
-interface UpdateInfo {
-  version: string;
-  current_version: string;
-  release_date: string;
-  release_notes: string;
-  channel: string;
-  size_mb: number;
-  mandatory: boolean;
-}
-
-interface UpdateProgress {
-  downloaded_mb: number;
-  total_mb: number;
-  percentage: number;
-  speed_mbps: number;
-}
+import { Progress } from '@/components/ui/progress';
+import { useUpdater } from '@/components/updater/UpdaterProvider';
 
 export function UpdatePanel() {
-  const [update, setUpdate] = useState<UpdateInfo | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-  const [progress, setProgress] = useState<UpdateProgress | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    update,
+    progress,
+    checking,
+    downloading,
+    installing,
+    error,
+    checkForUpdates,
+    downloadAndInstall,
+  } = useUpdater();
   const [channel, setChannel] = useState('stable');
   const [autoUpdate, setAutoUpdate] = useState(true);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   useEffect(() => {
-    checkForUpdates();
-    loadSettings();
+    async function loadSettings() {
+      try {
+        const [nextChannel, nextAuto] = await Promise.all([
+          invoke<string>('get_update_channel'),
+          invoke<boolean>('is_auto_update_enabled'),
+        ]);
+        setChannel(nextChannel);
+        setAutoUpdate(nextAuto);
+      } catch (loadError) {
+        setSettingsError(String(loadError));
+      }
+    }
+
+    void loadSettings();
   }, []);
 
-  const loadSettings = async () => {
-    try {
-      const ch = await invoke<string>('get_update_channel');
-      setChannel(ch);
-      const auto = await invoke<boolean>('is_auto_update_enabled');
-      setAutoUpdate(auto);
-    } catch (err) {
-      console.error('Failed to load update settings:', err);
-    }
-  };
-
-  const checkForUpdates = async () => {
-    setChecking(true);
-    setError(null);
-    try {
-      const result = await invoke<UpdateInfo | null>('check_for_updates');
-      setUpdate(result);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  const downloadUpdate = async () => {
-    setDownloading(true);
-    setError(null);
-    try {
-      await invoke('download_update');
-      // Poll for progress
-      const pollProgress = async () => {
-        try {
-          const prog = await invoke<UpdateProgress>('get_download_progress');
-          setProgress(prog);
-          if (prog.percentage < 100) {
-            setTimeout(pollProgress, 500);
-          } else {
-            setDownloading(false);
-          }
-        } catch {
-          setDownloading(false);
-        }
-      };
-      pollProgress();
-    } catch (err) {
-      setError(String(err));
-      setDownloading(false);
-    }
-  };
-
-  const installUpdate = async () => {
-    try {
-      await invoke('install_update');
-    } catch (err) {
-      setError(String(err));
-    }
-  };
-
-  const skipUpdate = async () => {
-    await invoke('skip_update');
-    setUpdate(null);
-  };
-
-  const handleChannelChange = async (newChannel: string) => {
-    try {
-      await invoke('set_update_channel', { channel: newChannel });
-      setChannel(newChannel);
-    } catch (err) {
-      setError(String(err));
-    }
-  };
+  const activeError = error ?? settingsError;
 
   return (
-    <div className="h-full flex flex-col bg-[#0d1117] p-4">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[#c9d1d9] font-medium">Updates</h3>
+    <div className="flex h-full flex-col bg-[#0d1117] p-4 text-[#c9d1d9]">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="font-medium">Updates</h3>
         <button
-          onClick={checkForUpdates}
-          disabled={checking}
-          className="flex items-center gap-2 px-3 py-1.5 bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-sm rounded disabled:opacity-50"
+          onClick={() => void checkForUpdates(true)}
+          disabled={checking || downloading || installing}
+          className="flex items-center gap-2 rounded bg-[#21262d] px-3 py-1.5 text-sm text-[#c9d1d9] hover:bg-[#30363d] disabled:opacity-50"
         >
           <RefreshCw size={16} className={checking ? 'animate-spin' : ''} />
           Check for Updates
         </button>
       </div>
 
-      {/* Error */}
-      {error && (
-        <div className="bg-[#f85149]/10 border border-[#f85149] text-[#f85149] px-4 py-2 rounded mb-4 flex items-center justify-between">
-          <span className="text-sm">{error}</span>
-          <button onClick={() => setError(null)}>
-            <X size={16} />
-          </button>
+      {activeError ? (
+        <div className="mb-4 rounded border border-[#f85149]/40 bg-[#f85149]/10 px-4 py-2 text-sm text-[#ffb4ad]">
+          {activeError}
         </div>
-      )}
+      ) : null}
 
-      {/* Update Available */}
-      {update && (
-        <div className="bg-[#161b22] border border-[#30363d] rounded p-4 mb-4">
+      {update ? (
+        <div className="mb-4 rounded border border-[#30363d] bg-[#161b22] p-4">
           <div className="flex items-start gap-3">
-            <div className="p-2 bg-[#238636] rounded">
+            <div className="rounded bg-[#238636] p-2">
               <ArrowUp size={20} className="text-white" />
             </div>
-            <div className="flex-1">
-              <h4 className="text-[#c9d1d9] font-medium mb-1">
-                Update Available: v{update.version}
-              </h4>
-              <p className="text-sm text-[#8b949e] mb-2">
-                Current: v{update.current_version} • Size: {update.size_mb.toFixed(1)} MB
-              </p>
-              
-              {/* Release Notes */}
-              <div className="bg-[#0d1117] rounded p-3 mb-3 text-sm text-[#8b949e] max-h-40 overflow-y-auto">
-                {update.release_notes.split('\n').map((line, i) => (
-                  <p key={i} className="mb-1">{line}</p>
-                ))}
+            <div className="flex-1 space-y-3">
+              <div>
+                <h4 className="mb-1 font-medium text-[#f0f6fc]">Update Available: v{update.version}</h4>
+                <p className="text-sm text-[#8b949e]">
+                  Current: v{update.currentVersion}
+                  {update.sizeMb ? ` • Size: ${update.sizeMb.toFixed(1)} MB` : ''}
+                  {update.releaseDate ? ` • Published ${update.releaseDate}` : ''}
+                </p>
               </div>
 
-              {/* Download Progress */}
-              {downloading && progress && (
-                <div className="mb-3">
-                  <div className="flex items-center justify-between text-sm text-[#8b949e] mb-1">
-                    <span>{progress.downloaded_mb.toFixed(1)} / {progress.total_mb.toFixed(1)} MB</span>
-                    <span>{progress.speed_mbps.toFixed(1)} MB/s</span>
-                  </div>
-                  <div className="w-full h-2 bg-[#21262d] rounded overflow-hidden">
-                    <div
-                      className="h-full bg-[#238636] transition-all"
-                      style={{ width: `${progress.percentage}%` }}
-                    />
-                  </div>
-                </div>
-              )}
+              <div className="max-h-40 overflow-y-auto rounded bg-[#0d1117] p-3 text-sm text-[#8b949e]">
+                {update.releaseNotes || 'No release notes were provided for this release.'}
+              </div>
 
-              {/* Actions */}
+              {progress ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm text-[#8b949e]">
+                    <span>
+                      {progress.downloadedBytes.toLocaleString()} bytes
+                      {progress.totalBytes ? ` / ${progress.totalBytes.toLocaleString()} bytes` : ''}
+                    </span>
+                    <span>{Math.round(progress.percentage)}%</span>
+                  </div>
+                  <Progress value={progress.percentage} className="bg-[#21262d] [&_[data-slot=progress-indicator]]:bg-[#238636]" />
+                </div>
+              ) : null}
+
               <div className="flex gap-2">
-                {!downloading && progress?.percentage !== 100 ? (
-                  <>
-                    <button
-                      onClick={downloadUpdate}
-                      className="flex items-center gap-2 px-4 py-2 bg-[#238636] hover:bg-[#2ea043] text-white text-sm rounded"
-                    >
-                      <Download size={16} />
-                      Download
-                    </button>
-                    {!update.mandatory && (
-                      <button
-                        onClick={skipUpdate}
-                        className="px-4 py-2 bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-sm rounded"
-                      >
-                        Skip
-                      </button>
-                    )}
-                  </>
-                ) : progress?.percentage === 100 ? (
+                <button
+                  onClick={() => void downloadAndInstall()}
+                  disabled={checking || downloading || installing}
+                  className="flex items-center gap-2 rounded bg-[#238636] px-4 py-2 text-sm text-white hover:bg-[#2ea043] disabled:opacity-50"
+                >
+                  {downloading || installing ? <RefreshCw size={16} className="animate-spin" /> : <Download size={16} />}
+                  {installing ? 'Restarting…' : downloading ? 'Downloading…' : 'Download & Restart'}
+                </button>
+                {!update.mandatory ? (
                   <button
-                    onClick={installUpdate}
-                    className="flex items-center gap-2 px-4 py-2 bg-[#238636] hover:bg-[#2ea043] text-white text-sm rounded"
+                    onClick={async () => {
+                      await invoke('skip_update', { version: update.version });
+                      await checkForUpdates(false);
+                    }}
+                    className="rounded bg-[#21262d] px-4 py-2 text-sm text-[#c9d1d9] hover:bg-[#30363d]"
                   >
-                    <Check size={16} />
-                    Install & Restart
+                    Skip
                   </button>
-                ) : (
-                  <button
-                    onClick={() => invoke('cancel_update')}
-                    className="px-4 py-2 bg-[#f85149] hover:bg-[#da3633] text-white text-sm rounded"
-                  >
-                    Cancel
-                  </button>
-                )}
+                ) : null}
               </div>
             </div>
           </div>
         </div>
-      )}
-
-      {/* No Update */}
-      {!update && !checking && (
+      ) : !checking ? (
         <div className="flex flex-col items-center justify-center py-8 text-[#8b949e]">
-          <Check size={48} className="text-[#3fb950] mb-4" />
-          <p className="text-[#c9d1d9]">You're up to date!</p>
-          <p className="text-sm">v{'0.1.0'}</p>
+          <Check size={48} className="mb-4 text-[#3fb950]" />
+          <p className="text-[#c9d1d9]">You&apos;re up to date.</p>
+          <p className="text-sm">Signed releases will appear here automatically.</p>
         </div>
-      )}
+      ) : null}
 
-      {/* Settings */}
-      <div className="mt-auto pt-4 border-t border-[#30363d]">
-        <h4 className="text-sm text-[#c9d1d9] font-medium mb-3">Update Settings</h4>
-        
-        {/* Channel */}
-        <div className="flex items-center justify-between mb-3">
+      <div className="mt-auto border-t border-[#30363d] pt-4">
+        <h4 className="mb-3 text-sm font-medium text-[#c9d1d9]">Update Settings</h4>
+
+        <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Info size={14} className="text-[#8b949e]" />
             <span className="text-sm text-[#8b949e]">Update Channel</span>
           </div>
           <select
             value={channel}
-            onChange={(e) => handleChannelChange(e.target.value)}
-            className="bg-[#161b22] border border-[#30363d] rounded px-3 py-1 text-[#c9d1d9] text-sm"
+            onChange={async (event) => {
+              const nextChannel = event.target.value;
+              await invoke('set_update_channel', { channel: nextChannel });
+              setChannel(nextChannel);
+              await checkForUpdates(false);
+            }}
+            className="rounded border border-[#30363d] bg-[#161b22] px-3 py-1 text-sm text-[#c9d1d9]"
           >
             <option value="stable">Stable</option>
             <option value="beta">Beta</option>
@@ -242,25 +150,18 @@ export function UpdatePanel() {
           </select>
         </div>
 
-        {/* Auto Update */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Clock size={14} className="text-[#8b949e]" />
-            <span className="text-sm text-[#8b949e]">Auto Update</span>
-          </div>
+          <span className="text-sm text-[#8b949e]">Auto Update</span>
           <button
             onClick={async () => {
-              await invoke('set_auto_update', { enabled: !autoUpdate });
-              setAutoUpdate(!autoUpdate);
+              const nextValue = !autoUpdate;
+              await invoke('set_auto_update', { enabled: nextValue });
+              setAutoUpdate(nextValue);
             }}
-            className={`w-12 h-6 rounded-full relative ${
-              autoUpdate ? 'bg-[#238636]' : 'bg-[#21262d]'
-            }`}
+            className={`relative h-6 w-12 rounded-full ${autoUpdate ? 'bg-[#238636]' : 'bg-[#21262d]'}`}
           >
             <div
-              className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                autoUpdate ? 'translate-x-7' : 'translate-x-1'
-              }`}
+              className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-transform ${autoUpdate ? 'translate-x-7' : 'translate-x-1'}`}
             />
           </button>
         </div>
