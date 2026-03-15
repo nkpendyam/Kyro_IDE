@@ -1,6 +1,8 @@
 //! Git commands for KYRO IDE — uses types from git module
 
-use crate::git::{BlameLine, DiffHunk, FileDiff, GitBranch, GitCommit, GitManager, GitStatus, StashEntry};
+use crate::git::{
+    BlameLine, DiffHunk, FileDiff, GitBranch, GitCommit, GitManager, GitStatus, StashEntry,
+};
 use tauri::command;
 
 #[command]
@@ -120,7 +122,9 @@ pub async fn git_diff_file(path: String) -> Result<Vec<DiffHunk>, String> {
 
     // Get all diffs and filter to the requested file
     let diffs = mgr.diff(&repo_path, false)?;
-    let file_diff = diffs.into_iter().find(|d| d.file == rel_path || d.file == path || path.ends_with(&d.file));
+    let file_diff = diffs
+        .into_iter()
+        .find(|d| d.file == rel_path || d.file == path || path.ends_with(&d.file));
     match file_diff {
         Some(diff) => Ok(diff.hunks),
         None => Ok(vec![]), // No changes for this file

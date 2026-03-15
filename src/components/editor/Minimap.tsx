@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useLayoutEffect, useEffect, useState, useCallback } from 'react';
-import type * as monaco from 'monaco-editor';
+import * as monaco from 'monaco-editor';
 import { useKyroStore } from '@/store/kyroStore';
 
 // Minimap configuration

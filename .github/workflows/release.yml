@@ -12,6 +12,14 @@ jobs:
   build-release:
     name: Release (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
+    env:
+      WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+      APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+      APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
     strategy:
       fail-fast: false
       matrix:
@@ -20,20 +28,42 @@ jobs:
             label: windows-x64
             target: x86_64-pc-windows-msvc
             artifact_name: kyro-ide-windows-x64
-            artifact_glob: src-tauri/target/release/bundle/msi/*.msi
           - os: macos-14
             label: macos-arm64
             target: aarch64-apple-darwin
             artifact_name: kyro-ide-macos-arm64
-            artifact_glob: src-tauri/target/release/bundle/dmg/*.dmg
           - os: ubuntu-22.04
             label: linux-x64
             target: x86_64-unknown-linux-gnu
             artifact_name: kyro-ide-linux-x64
-            artifact_glob: src-tauri/target/release/bundle/appimage/*.AppImage
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Determine release channel
+        id: channel
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" == *"-alpha"* ]]; then
+            echo "channel=alpha" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" == *"-beta"* ]]; then
+            echo "channel=beta" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate changelog contains release version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! grep -Eq "^## \[$VERSION\]" CHANGELOG.md; then
+            echo "CHANGELOG.md missing heading: ## [$VERSION]"
+            exit 1
+          fi
 
       - name: Install Linux system dependencies
         if: matrix.os == 'ubuntu-22.04'
@@ -73,14 +103,110 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Kyro IDE ${{ github.ref_name }}'
+          releaseName: 'Kyro IDE ${{ github.ref_name }} (${{ steps.channel.outputs.channel }})'
           releaseBody: 'See CHANGELOG.md for details.'
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ steps.channel.outputs.prerelease }}
           args: --target ${{ matrix.target }}
 
-      - name: Upload release artifact
+      - name: Import Windows code signing certificate (optional)
+        if: matrix.os == 'windows-2022' && env.WINDOWS_CERTIFICATE_BASE64 != '' && env.WINDOWS_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "kyro-codesign.pfx"
+          [System.IO.File]::WriteAllBytes($certPath, [System.Convert]::FromBase64String("$env:WINDOWS_CERTIFICATE_BASE64"))
+          $securePassword = ConvertTo-SecureString -String "$env:WINDOWS_CERTIFICATE_PASSWORD" -AsPlainText -Force
+          Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $securePassword | Out-Null
+
+      - name: Sign Windows bundles (optional)
+        if: matrix.os == 'windows-2022' && env.WINDOWS_CERTIFICATE_BASE64 != '' && env.WINDOWS_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          $msiFiles = Get-ChildItem -Path "src-tauri/target/release/bundle/msi" -Filter "*.msi" -ErrorAction SilentlyContinue
+          $exeFiles = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" -ErrorAction SilentlyContinue
+          $allFiles = @($msiFiles + $exeFiles)
+          if ($allFiles.Count -eq 0) {
+            throw "No Windows installer files found to sign"
+          }
+          foreach ($file in $allFiles) {
+            & signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /a "$($file.FullName)"
+          }
+
+      - name: Import Apple code-signing certificates (optional)
+        if: matrix.os == 'macos-14' && env.APPLE_CERTIFICATE_BASE64 != '' && env.APPLE_CERTIFICATE_PASSWORD != ''
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ env.APPLE_CERTIFICATE_BASE64 }}
+          p12-password: ${{ env.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Notarize macOS DMG (optional)
+        if: matrix.os == 'macos-14' && env.APPLE_NOTARY_APPLE_ID != '' && env.APPLE_NOTARY_APP_PASSWORD != '' && env.APPLE_NOTARY_TEAM_ID != ''
+        run: |
+          DMG_PATH=$(ls src-tauri/target/release/bundle/dmg/*.dmg | head -n 1)
+          if [ -z "$DMG_PATH" ]; then
+            echo "No DMG found for notarization"
+            exit 1
+          fi
+          xcrun notarytool submit "$DMG_PATH" \
+            --apple-id "${{ env.APPLE_NOTARY_APPLE_ID }}" \
+            --password "${{ env.APPLE_NOTARY_APP_PASSWORD }}" \
+            --team-id "${{ env.APPLE_NOTARY_TEAM_ID }}" \
+            --wait
+          xcrun stapler staple "$DMG_PATH"
+
+      - name: Smoke check + checksums (Windows)
+        if: matrix.os == 'windows-2022'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path checksums -Force | Out-Null
+          $msi = Get-ChildItem -Path "src-tauri/target/release/bundle/msi" -Filter "*.msi" | Select-Object -First 1
+          $exe = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" | Select-Object -First 1
+          if (-not $msi) { throw "MSI artifact missing" }
+          if (-not $exe) { throw "NSIS EXE artifact missing" }
+          Get-FileHash -Algorithm SHA256 $msi.FullName | ForEach-Object { "$($_.Hash)  $($msi.Name)" } | Out-File checksums/windows-msi.sha256
+          Get-FileHash -Algorithm SHA256 $exe.FullName | ForEach-Object { "$($_.Hash)  $($exe.Name)" } | Out-File checksums/windows-nsis.sha256
+
+      - name: Smoke check + checksums (macOS)
+        if: matrix.os == 'macos-14'
+        run: |
+          mkdir -p checksums
+          DMG_PATH=$(ls src-tauri/target/release/bundle/dmg/*.dmg | head -n 1)
+          test -n "$DMG_PATH"
+          shasum -a 256 "$DMG_PATH" > checksums/macos-dmg.sha256
+
+      - name: Smoke check + checksums (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          mkdir -p checksums
+          APPIMAGE_PATH=$(ls src-tauri/target/release/bundle/appimage/*.AppImage | head -n 1)
+          test -n "$APPIMAGE_PATH"
+          sha256sum "$APPIMAGE_PATH" > checksums/linux-appimage.sha256
+
+      - name: Upload release artifact (Windows)
+        if: matrix.os == 'windows-2022'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_glob }}
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+
+      - name: Upload release artifact (macOS)
+        if: matrix.os == 'macos-14'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+
+      - name: Upload release artifact (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: src-tauri/target/release/bundle/appimage/*.AppImage
+
+      - name: Upload artifact checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}-checksums
+          path: checksums/*

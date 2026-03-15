@@ -13,3 +13,15 @@ declare module '@tauri-apps/plugin-dialog' {
   export function ask(message: string, options?: { title?: string; type?: 'info' | 'warning' | 'error' }): Promise<boolean>;
   export function confirm(message: string, options?: { title?: string; type?: 'info' | 'warning' | 'error' }): Promise<boolean>;
 }
+
+declare global {
+  interface Window {
+    __TAURI__?: {
+      core: {
+        invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
+      };
+    };
+  }
+}
+
+export {};

@@ -1,9 +1,11 @@
 import type { NextConfig } from "next";
 
+const allowTypeScriptBuildErrors = process.env.KYRO_ALLOW_TS_BUILD_ERRORS === "1";
+
 const nextConfig: NextConfig = {
   output: "export",
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: allowTypeScriptBuildErrors,
   },
   reactStrictMode: false,
   experimental: {
@@ -26,12 +28,6 @@ const nextConfig: NextConfig = {
         tls: false,
       };
     }
-    
-    // Monaco Editor worker configuration
-    config.module.rules.push({
-      test: /\.worker\.js$/,
-      use: { loader: 'worker-loader' },
-    });
 
     return config;
   },

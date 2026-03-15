@@ -41,10 +41,10 @@ cd ..
 echo "🗄️  Generating Prisma client..."
 $PKG_MANAGER run db:generate
 
+echo "🩺 Running kyro doctor..."
+$PKG_MANAGER run doctor
+
 echo "✅ Development environment setup complete!"
 echo ""
 echo "To start development:"
-echo "  1. Start frontend: $PKG_MANAGER run dev"
-echo "  2. Start Tauri: $PKG_MANAGER run tauri:dev"
-echo ""
-echo "Or run both with: $PKG_MANAGER run tauri:dev"
+echo "  1. Start Tauri + Next: $PKG_MANAGER run tauri:dev"

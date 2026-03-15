@@ -40,10 +40,10 @@ Pop-Location
 Write-Host "🗄️  Generating Prisma client..." -ForegroundColor Cyan
 & $PKG_MANAGER run db:generate
 
+Write-Host "🩺 Running kyro doctor..." -ForegroundColor Cyan
+& $PKG_MANAGER run doctor
+
 Write-Host "✅ Development environment setup complete!" -ForegroundColor Green
 Write-Host ""
 Write-Host "To start development:"
-Write-Host "  1. Start frontend: $PKG_MANAGER run dev"
-Write-Host "  2. Start Tauri: $PKG_MANAGER run tauri:dev"
-Write-Host ""
-Write-Host "Or run both with: $PKG_MANAGER run tauri:dev"
+Write-Host "  1. Start Tauri + Next: $PKG_MANAGER run tauri:dev"

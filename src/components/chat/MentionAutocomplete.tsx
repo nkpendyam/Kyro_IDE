@@ -82,6 +82,7 @@ export function MentionAutocomplete({ inputValue, cursorPosition, onSelect, onDi
   }, [atQuery]);
 
   const items = showFilePicker ? filteredFiles : filteredMentions;
+  const effectiveSelectedIndex = items.length === 0 ? 0 : Math.min(selectedIndex, items.length - 1);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

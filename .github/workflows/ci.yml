@@ -30,6 +30,9 @@ jobs:
       - name: Lint frontend
         run: bun run lint
 
+      - name: Type-check frontend
+        run: bun run type-check
+
       - name: Test frontend
         run: bun run test
 
@@ -80,6 +83,10 @@ jobs:
       - name: Rust clippy
         working-directory: src-tauri
         run: cargo clippy --workspace --all-targets
+
+      - name: Rust cargo check
+        working-directory: src-tauri
+        run: cargo check --workspace --locked
 
       - name: Rust tests
         working-directory: src-tauri

@@ -52,3 +52,12 @@ server.log
 
 # Rust / Tauri build artifacts
 /src-tauri/target/
+
+# Playwright
+/playwright-report/
+/test-results/
+
+# Word/Office documents
+*.docx
+*.xlsx
+*.pptx

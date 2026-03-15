@@ -2,7 +2,7 @@
 
 This guide is the production baseline for installing and building Kyro IDE on Windows, macOS, and Linux.
 
-## 0) Windows-first bootstrap (recommended)
+## 0) Bootstrap Scripts (recommended)
 
 From the repository root in PowerShell:
 
@@ -10,7 +10,15 @@ From the repository root in PowerShell:
 .\scripts\setup.ps1
 ```
 
-This installs/verifies Rust, Node.js LTS, Bun, Tauri Windows prerequisites (Build Tools + WebView2), and runs `bun install`.
+This installs/verifies Rust, Node.js LTS, Bun, Tauri Windows prerequisites (Build Tools + WebView2), runs `bun install`, and runs `kyro doctor`.
+
+On macOS/Linux:
+
+```bash
+./scripts/setup.sh
+```
+
+This verifies required tools, checks OS prerequisites, installs dependencies, and runs `kyro doctor`.
 
 ## 1) Prerequisites (All Platforms)
 
@@ -26,6 +34,16 @@ bun --version
 rustc --version
 cargo --version
 ```
+
+Run environment diagnostics:
+
+```bash
+bun run doctor
+bun run doctor:full
+```
+
+- `doctor` checks required prerequisites (Node, Bun, Rust, Cargo, Tauri project dependency, WebView2 on Windows).
+- `doctor:full` additionally checks optional integrations (AirLLM, Ollama, PicoClaw, n8n).
 
 ## 2) Clone + Bootstrap
 
@@ -182,6 +200,24 @@ python main.py
 ```
 
 Use this backend for larger local models when system VRAM/RAM allows.
+
+By default, doctor checks `http://127.0.0.1:8765/health`. Override with:
+
+```bash
+export KYRO_AIRLLM_URL=http://127.0.0.1:8765/health
+# PowerShell: $env:KYRO_AIRLLM_URL = "http://127.0.0.1:8765/health"
+```
+
+## Optional backend feature flags
+
+Kyro can run without optional providers. If you enable a provider in production, set its URL:
+
+- `KYRO_ENABLE_AIRLLM=1` + `KYRO_AIRLLM_URL`
+- `KYRO_ENABLE_OLLAMA=1` + `KYRO_OLLAMA_URL`
+- `KYRO_ENABLE_PICOCLAW=1` + `KYRO_PICOCLAW_URL`
+- `KYRO_ENABLE_N8N=1` + `KYRO_N8N_URL`
+
+Production sanity checks validate these combinations during build.
 
 ## 8) Troubleshooting Quick Checks
 

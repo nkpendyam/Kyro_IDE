@@ -65,6 +65,9 @@ if (-not (Test-Path $webView2RegPath)) {
 Write-Step "Installing project dependencies"
 bun install
 
+Write-Step "Running kyro doctor"
+bun run doctor
+
 Write-Step "Environment verification"
 node --version
 bun --version

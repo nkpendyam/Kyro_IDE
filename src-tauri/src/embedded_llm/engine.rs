@@ -72,7 +72,7 @@ impl EmbeddedLLMEngine {
         }
 
         // Get system memory
-        let ram_bytes = sysinfo::System::new_all().total_memory() * 1024;
+        let ram_bytes = sysinfo::System::new_all().total_memory();
 
         // Detect GPU and VRAM
         let (gpu_name, vram_bytes, recommended_backend, recommended_tier) =
@@ -146,16 +146,72 @@ impl EmbeddedLLMEngine {
             }
         }
 
-        // Try to detect any GPU - simplified for sysinfo 0.30
-        let system = sysinfo::System::new_all();
+        #[cfg(target_os = "windows")]
+        {
+            if let Some((gpu_name, vram_bytes)) = Self::detect_windows_gpu() {
+                log::info!(
+                    "Windows GPU detected: {} ({} GB VRAM)",
+                    gpu_name,
+                    vram_bytes / (1024 * 1024 * 1024)
+                );
+                return (
+                    Some(gpu_name),
+                    vram_bytes,
+                    "cpu".to_string(),
+                    MemoryTier::Cpu,
+                );
+            }
+        }
 
+        // Try to detect any GPU - simplified for sysinfo 0.30
         // Fallback to CPU
-        let ram = system.total_memory() * 1024;
-        let usable = (ram as f64 * 0.25) as u64; // Use 25% of RAM for CPU inference
+        let usable = 0;
 
         log::info!("No dedicated GPU detected, using CPU inference");
 
         (None, usable, "cpu".to_string(), MemoryTier::Cpu)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn detect_windows_gpu() -> Option<(String, u64)> {
+        use std::process::Command;
+
+        let output = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_VideoController | ForEach-Object { \"$($_.Name)|$($_.AdapterRAM)\" }",
+            ])
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut best: Option<(String, u64)> = None;
+
+        for line in stdout.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            let mut parts = trimmed.splitn(2, '|');
+            let name = parts.next()?.trim();
+            let ram_str = parts.next().unwrap_or("0").trim();
+            let adapter_ram = ram_str.parse::<u64>().unwrap_or(0);
+
+            if adapter_ram > 0 {
+                match &best {
+                    Some((_, current_best)) if *current_best >= adapter_ram => {}
+                    _ => best = Some((name.to_string(), adapter_ram)),
+                }
+            }
+        }
+
+        best
     }
 
     /// Detect CUDA GPU using nvidia-smi or NVML
@@ -317,7 +373,7 @@ impl EmbeddedLLMEngine {
                 // For Apple Silicon, use unified memory
                 if vram == 0 {
                     let system = sysinfo::System::new_all();
-                    vram = system.total_memory() * 1024;
+                    vram = system.total_memory();
 
                     // Detect specific Apple Silicon chip
                     let chip_name = Self::detect_apple_silicon_chip();
@@ -334,7 +390,7 @@ impl EmbeddedLLMEngine {
         }
 
         // Fallback: Use unified memory as VRAM
-        let ram = sysinfo::System::new_all().total_memory() * 1024;
+        let ram = sysinfo::System::new_all().total_memory();
         Ok(GpuInfo {
             name: "Apple Silicon".to_string(),
             vram_bytes: ram,

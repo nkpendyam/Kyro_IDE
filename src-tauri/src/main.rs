@@ -779,7 +779,7 @@ fn detect_hardware_capabilities() -> embedded_llm::HardwareCapabilities {
     // Get system memory
     let mut sys = sysinfo::System::new_all();
     sys.refresh_memory();
-    let ram_bytes = sys.total_memory() * 1024;
+    let ram_bytes = sys.total_memory();
 
     // Detect GPU and VRAM
     let (gpu_name, vram_bytes, recommended_backend, recommended_tier) = detect_gpu();
@@ -815,7 +815,7 @@ fn detect_gpu() -> (Option<String>, u64, String, embedded_llm::MemoryTier) {
     {
         let mut sys = sysinfo::System::new_all();
         sys.refresh_memory();
-        let ram = sys.total_memory() * 1024;
+        let ram = sys.total_memory();
         let usable_vram = (ram as f64 * 0.75) as u64; // Metal gives ~75% of unified memory
         let tier = embedded_llm::MemoryTier::from_vram(usable_vram);
         return (
@@ -826,15 +826,66 @@ fn detect_gpu() -> (Option<String>, u64, String, embedded_llm::MemoryTier) {
         );
     }
 
+    #[cfg(target_os = "windows")]
+    {
+        if let Some((gpu_name, vram_bytes)) = detect_windows_gpu_info() {
+            return (
+                Some(gpu_name),
+                vram_bytes,
+                "cpu".to_string(),
+                embedded_llm::MemoryTier::Cpu,
+            );
+        }
+    }
+
     // Fallback to CPU
-    let mut sys = sysinfo::System::new_all();
-    sys.refresh_memory();
-    let ram = sys.total_memory() * 1024;
-    let usable = (ram as f64 * 0.25) as u64;
+    let usable = 0;
     (
         None,
         usable,
         "cpu".to_string(),
         embedded_llm::MemoryTier::Cpu,
     )
+}
+
+#[cfg(target_os = "windows")]
+fn detect_windows_gpu_info() -> Option<(String, u64)> {
+    use std::process::Command;
+
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_VideoController | ForEach-Object { \"$($_.Name)|$($_.AdapterRAM)\" }",
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut best: Option<(String, u64)> = None;
+
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let mut parts = trimmed.splitn(2, '|');
+        let name = parts.next()?.trim();
+        let ram_str = parts.next().unwrap_or("0").trim();
+        let adapter_ram = ram_str.parse::<u64>().unwrap_or(0);
+
+        if adapter_ram > 0 {
+            match &best {
+                Some((_, current_best)) if *current_best >= adapter_ram => {}
+                _ => best = Some((name.to_string(), adapter_ram)),
+            }
+        }
+    }
+
+    best
 }

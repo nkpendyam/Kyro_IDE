@@ -150,9 +150,9 @@ const categoryColors = {
 };
 
 async function invokeTauri<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
-  if (typeof window !== 'undefined' && (window as { __TAURI__?: { core: { invoke: (c: string, a?: object) => Promise<T> } } }).__TAURI__) {
+  if (typeof window !== 'undefined' && window.__TAURI__) {
     try {
-      return await (window as { __TAURI__: { core: { invoke: (c: string, a?: object) => Promise<T> } } }).__TAURI__.core.invoke(cmd, args);
+      return await window.__TAURI__.core.invoke<T>(cmd, args);
     } catch (e) {
       console.error(cmd, e);
       return null;
