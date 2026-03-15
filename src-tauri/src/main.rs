@@ -459,6 +459,8 @@ fn main() {
             commands::git::git_stash_pop,
             commands::git::git_stash_list,
             commands::git::git_merge,
+            commands::review::review_diff,
+            commands::review::review_overview,
             commands::git::git_stage,
             commands::git::git_unstage,
             commands::git::git_stage_all,

@@ -13,6 +13,7 @@ pub mod ai;
 
 // ============ Git Operations ============
 pub mod git;
+pub mod review;
 
 // ============ LSP Operations ============
 pub mod lsp;

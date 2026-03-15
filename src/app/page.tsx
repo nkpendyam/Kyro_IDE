@@ -31,6 +31,7 @@ import { TestRunnerPanel } from '@/components/testing/TestRunnerPanel';
 import { BrowserPreview } from '@/components/browser/BrowserPreview';
 import { SymbolSearch } from '@/components/search/SymbolSearch';
 import { DiffViewer } from '@/components/git/DiffViewer';
+import { PRReviewPanel } from '@/components/git/PRReviewPanel';
 import { ModelSelector } from '@/components/chat/ModelSelector';
 import { TerminalAI } from '@/components/terminal/TerminalAI';
 import { ProjectRules } from '@/components/settings/ProjectRules';
@@ -70,7 +71,7 @@ import {
 } from 'lucide-react';
 
 // Types for AI responses
-type SidebarPanel = 'explorer' | 'search' | 'git' | 'debug' | 'mission' | 'settings' | 'extensions' | 'collaboration' | 'plugins' | 'rag' | 'lsp' | 'llm' | 'update' | 'symbols' | 'agent-stream' | 'testing' | 'browser' | 'rules' | 'autopilot' | 'remote';
+type SidebarPanel = 'explorer' | 'search' | 'git' | 'review' | 'debug' | 'mission' | 'settings' | 'extensions' | 'collaboration' | 'plugins' | 'rag' | 'lsp' | 'llm' | 'update' | 'symbols' | 'agent-stream' | 'testing' | 'browser' | 'rules' | 'autopilot' | 'remote';
 
 // Fallback file tree (used when Tauri is not available)
 const fallbackFileTree: FileNode = {
@@ -423,6 +424,7 @@ export default function Home() {
               { id: 'browser' as SidebarPanel, icon: Globe, label: 'Browser Preview' },
               { id: 'rules' as SidebarPanel, icon: BookOpen, label: 'Project Rules' },
               { id: 'autopilot' as SidebarPanel, icon: Shield, label: 'Agent Autopilot' },
+              { id: 'review' as SidebarPanel, icon: Shield, label: 'PR Review' },
               { id: 'remote' as SidebarPanel, icon: Monitor, label: 'Remote / Containers' },
               { id: 'mission' as SidebarPanel, icon: Rocket, label: 'Mission Control' },
             ].map((item) => {
@@ -477,6 +479,7 @@ export default function Home() {
                 {activePanel === 'browser' && 'Browser Preview'}
                 {activePanel === 'rules' && 'Project Rules'}
                 {activePanel === 'autopilot' && 'Agent Autopilot'}
+                {activePanel === 'review' && 'PR Review'}
                 {activePanel === 'remote' && 'Remote / Containers'}
               </span>
             </div>
@@ -504,6 +507,9 @@ export default function Home() {
               )}
               {activePanel === 'git' && (
                 <GitStagingPanel projectPath={projectPath || '.'} onFileSelect={handleFileClick} />
+              )}
+              {activePanel === 'review' && (
+                <PRReviewPanel projectPath={projectPath || '.'} onOpenFile={handleFileClick} />
               )}
               {activePanel === 'debug' && (
                 <DebugPanel />
