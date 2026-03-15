@@ -115,7 +115,7 @@ regex = "1.10"
 rust-stemmers = "1.2"
 
 # ============ System Info ============
-sysinfo = "0.30"
+sysinfo = "0.38"
 
 # ============ Archive Handling (for updates/plugins) ============
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
