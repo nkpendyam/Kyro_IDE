@@ -15,6 +15,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
 
+use crate::embedded_llm::{EmbeddedLLMConfig, EmbeddedLLMEngine, InferenceRequest};
+
 /// AI Backend configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiBackendConfig {
@@ -103,6 +105,7 @@ pub struct AiService {
     cache: Arc<RwLock<HashMap<String, CompletionResponse>>>,
     order: Arc<RwLock<VecDeque<String>>>,
     capacity: usize,
+    embedded_engine: Arc<RwLock<Option<EmbeddedLLMEngine>>>,
 }
 
 impl AiService {
@@ -120,6 +123,7 @@ impl AiService {
             cache: Arc::new(RwLock::new(HashMap::new())),
             order: Arc::new(RwLock::new(VecDeque::new())),
             capacity: 64,
+            embedded_engine: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -224,7 +228,6 @@ impl AiService {
                 self.complete_openai_compatible(&request, "http://localhost:8000/v1")
                     .await?
             }
-            #[cfg(feature = "llama-cpp")]
             "local" => self.complete_local(&request).await?,
             _ => {
                 // Fallback to pattern matching
@@ -470,14 +473,108 @@ impl AiService {
     /// Complete using local llama.cpp
     #[cfg(feature = "llama-cpp")]
     async fn complete_local(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
-        // Local inference implementation
-        // This would use the llama-cpp crate for actual inference
-        bail!("Local inference not yet implemented - use Ollama or LM Studio")
+        let start = Instant::now();
+
+        let mut engine_guard = self.embedded_engine.write().await;
+        if engine_guard.is_none() {
+            let config = EmbeddedLLMConfig {
+                default_model: self.config.model.clone(),
+                context_size: 8192,
+                ..EmbeddedLLMConfig::default()
+            };
+            *engine_guard = Some(EmbeddedLLMEngine::new(config).await?);
+        }
+
+        let engine = engine_guard
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("Embedded LLM engine failed to initialize"))?;
+
+        let inference_request = InferenceRequest {
+            prompt: self.build_prompt(request),
+            system_prompt: request.system_prompt.clone(),
+            max_tokens: request.max_tokens.unwrap_or(self.config.max_tokens),
+            temperature: request.temperature.unwrap_or(self.config.temperature),
+            top_p: 0.95,
+            top_k: 40,
+            repeat_penalty: 1.1,
+            stop_sequences: request.stop_sequences.clone(),
+            stream: self.config.stream,
+            history: request
+                .history
+                .iter()
+                .map(|msg| crate::embedded_llm::ConversationTurn {
+                    role: msg.role.clone(),
+                    content: msg.content.clone(),
+                })
+                .collect(),
+        };
+
+        let response = engine.complete(&inference_request).await?;
+        let total_time_ms = start.elapsed().as_millis() as u64;
+
+        Ok(CompletionResponse {
+            text: response.text,
+            model: response.model,
+            backend: "local".to_string(),
+            tokens_generated: response.tokens_generated,
+            time_to_first_token_ms: response.time_to_first_token_ms,
+            total_time_ms,
+            tokens_per_second: response.tokens_per_second,
+            from_cache: response.from_cache,
+        })
     }
 
     #[cfg(not(feature = "llama-cpp"))]
-    async fn complete_local(&self, _request: &CompletionRequest) -> Result<CompletionResponse> {
-        bail!("Local inference not compiled - enable llama-cpp feature")
+    async fn complete_local(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
+        let start = Instant::now();
+
+        let mut engine_guard = self.embedded_engine.write().await;
+        if engine_guard.is_none() {
+            let config = EmbeddedLLMConfig {
+                default_model: self.config.model.clone(),
+                context_size: 8192,
+                ..EmbeddedLLMConfig::default()
+            };
+            *engine_guard = Some(EmbeddedLLMEngine::new(config).await?);
+        }
+
+        let engine = engine_guard
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("Embedded LLM engine failed to initialize"))?;
+
+        let inference_request = InferenceRequest {
+            prompt: self.build_prompt(request),
+            system_prompt: request.system_prompt.clone(),
+            max_tokens: request.max_tokens.unwrap_or(self.config.max_tokens),
+            temperature: request.temperature.unwrap_or(self.config.temperature),
+            top_p: 0.95,
+            top_k: 40,
+            repeat_penalty: 1.1,
+            stop_sequences: request.stop_sequences.clone(),
+            stream: self.config.stream,
+            history: request
+                .history
+                .iter()
+                .map(|msg| crate::embedded_llm::ConversationTurn {
+                    role: msg.role.clone(),
+                    content: msg.content.clone(),
+                })
+                .collect(),
+        };
+
+        let response = engine.complete(&inference_request).await?;
+        let total_time_ms = start.elapsed().as_millis() as u64;
+
+        Ok(CompletionResponse {
+            text: response.text,
+            model: response.model,
+            backend: "local".to_string(),
+            tokens_generated: response.tokens_generated,
+            time_to_first_token_ms: response.time_to_first_token_ms,
+            total_time_ms,
+            tokens_per_second: response.tokens_per_second,
+            from_cache: response.from_cache,
+        })
     }
 
     /// Fallback completion (pattern matching for basic assistance)
@@ -701,9 +798,10 @@ impl Default for AiService {
     }
 }
 
-#[cfg(all(test, feature = "fixme_tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::embedded_llm::MemoryTier;
 
     #[test]
     fn test_ai_service_creation() {
@@ -717,5 +815,70 @@ mod tests {
         let response = service.generate_pattern_response("fix the bug with unwrap()");
         assert!(response.contains("unwrap()"));
         assert!(response.contains("error handling"));
+    }
+
+    #[tokio::test]
+    async fn test_complete_local_uses_embedded_engine_when_backend_is_local() {
+        let service = AiService::new(AiBackendConfig {
+            backend: "local".to_string(),
+            model: "test-local-model".to_string(),
+            ..AiBackendConfig::default()
+        });
+
+        let result = service
+            .complete(CompletionRequest {
+                prompt: "Explain this Rust function".to_string(),
+                system_prompt: Some("You are a helpful coding assistant".to_string()),
+                history: vec![],
+                temperature: Some(0.2),
+                max_tokens: Some(64),
+                stop_sequences: vec![],
+                context: Some("fn greet() { println!(\"hi\"); }".to_string()),
+            })
+            .await
+            .expect("local completion should succeed");
+
+        assert_eq!(result.backend, "local");
+        assert!(!result.text.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_complete_local_initializes_embedded_engine_once() {
+        let service = AiService::new(AiBackendConfig {
+            backend: "local".to_string(),
+            ..AiBackendConfig::default()
+        });
+
+        let first = service
+            .complete(CompletionRequest {
+                prompt: "implement a function".to_string(),
+                system_prompt: None,
+                history: vec![],
+                temperature: None,
+                max_tokens: Some(32),
+                stop_sequences: vec![],
+                context: None,
+            })
+            .await
+            .expect("first local completion should succeed");
+
+        let second = service
+            .complete(CompletionRequest {
+                prompt: "implement a function".to_string(),
+                system_prompt: None,
+                history: vec![],
+                temperature: None,
+                max_tokens: Some(32),
+                stop_sequences: vec![],
+                context: None,
+            })
+            .await
+            .expect("second local completion should succeed");
+
+        let engine_guard = service.embedded_engine.read().await;
+        assert!(engine_guard.is_some());
+        assert_eq!(first.backend, "local");
+        assert!(second.from_cache || !second.text.is_empty());
+        let _tier = MemoryTier::Cpu;
     }
 }

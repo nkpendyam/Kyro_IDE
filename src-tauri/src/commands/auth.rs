@@ -26,6 +26,17 @@ pub struct UserInfo {
     pub avatar_url: Option<String>,
 }
 
+fn role_from_str(role: &str) -> Result<UserRole, String> {
+    match role.to_lowercase().as_str() {
+        "admin" => Ok(UserRole::Admin),
+        "editor" => Ok(UserRole::Editor),
+        "viewer" => Ok(UserRole::Viewer),
+        "owner" => Ok(UserRole::Owner),
+        "guest" => Ok(UserRole::Guest),
+        _ => Err(format!("Unknown role: {}", role)),
+    }
+}
+
 #[command]
 pub async fn login_user(username: String, password: String) -> Result<UserInfo, String> {
     let mut state = AUTH_STATE.write().await;
@@ -88,17 +99,17 @@ pub async fn is_authenticated() -> Result<bool, String> {
 #[command]
 pub async fn update_user_role(user_id: String, role: String) -> Result<(), String> {
     let mut state = AUTH_STATE.write().await;
+    let current_user = state
+        .current_user
+        .clone()
+        .ok_or_else(|| "Authentication required".to_string())?;
+    let admin_id = uuid::Uuid::parse_str(&current_user.id)
+        .map_err(|e| format!("Invalid current user UUID: {}", e))?;
     let uid = uuid::Uuid::parse_str(&user_id).map_err(|e| format!("Invalid UUID: {}", e))?;
-    let new_role = match role.to_lowercase().as_str() {
-        "admin" => UserRole::Admin,
-        "editor" => UserRole::Editor,
-        "viewer" => UserRole::Viewer,
-        "owner" => UserRole::Owner,
-        _ => UserRole::Viewer,
-    };
+    let new_role = role_from_str(&role)?;
     state
         .manager
-        .update_user_role(uid, new_role)
+        .change_role(admin_id, uid, new_role)
         .map_err(|e| format!("Failed: {}", e))
 }
 

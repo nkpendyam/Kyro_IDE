@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::command;
+use tauri::{command, AppHandle, Emitter};
 use tokio::sync::RwLock;
 
 lazy_static::lazy_static! {
@@ -65,6 +65,7 @@ pub struct CreateRoomRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JoinRoomRequest {
     pub room_id: String,
+    pub user_id: Option<String>,
     pub username: String,
 }
 
@@ -104,6 +105,35 @@ pub struct RoomStats {
     pub uptime_secs: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteCursor {
+    #[serde(rename = "userId")]
+    pub user_id: String,
+    #[serde(rename = "userName")]
+    pub user_name: String,
+    pub color: String,
+    pub line: u32,
+    pub column: u32,
+    pub selection: Option<CursorSelection>,
+}
+
+fn build_remote_cursors(room: &RoomInfo) -> Vec<RemoteCursor> {
+    room.users
+        .iter()
+        .filter_map(|user| match (user.cursor_line, user.cursor_col) {
+            (Some(line), Some(column)) => Some(RemoteCursor {
+                user_id: user.id.clone(),
+                user_name: user.name.clone(),
+                color: user.color.clone(),
+                line,
+                column,
+                selection: None,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 #[command]
 pub async fn create_room(request: CreateRoomRequest) -> Result<RoomInfo, String> {
     let mut state = COLLAB_STATE.write().await;
@@ -131,7 +161,10 @@ pub async fn join_room(request: JoinRoomRequest) -> Result<RoomInfo, String> {
         .get_mut(&request.room_id)
         .ok_or("Room not found")?;
     room.users.push(CollaboratorInfo {
-        id: uuid::Uuid::new_v4().to_string(),
+        id: request
+            .user_id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         name: request.username,
         color: format!("#{:06x}", rand::random::<u32>() & 0xFFFFFF),
         cursor_line: None,
@@ -288,8 +321,11 @@ pub struct CursorSelection {
     pub end_column: u32,
 }
 
-#[command]
-pub async fn broadcast_cursor(room_id: String, cursor: CursorBroadcast) -> Result<(), String> {
+pub async fn broadcast_cursor_legacy(
+    app: AppHandle,
+    room_id: String,
+    cursor: CursorBroadcast,
+) -> Result<(), String> {
     let mut state = COLLAB_STATE.write().await;
     let room = state.rooms.get_mut(&room_id).ok_or("Room not found")?;
     // Update the user's cursor in presence
@@ -302,5 +338,20 @@ pub async fn broadcast_cursor(room_id: String, cursor: CursorBroadcast) -> Resul
         user.cursor_line = Some(cursor.line);
         user.cursor_col = Some(cursor.column);
     }
+
+    let payload = serde_json::json!({
+        "type": "cursors",
+        "data": build_remote_cursors(room),
+    });
+    app.emit("collab:presence", payload)
+        .map_err(|e| format!("Failed to emit cursor update: {}", e))?;
+
     Ok(())
+}
+
+#[command]
+pub async fn get_room_cursors(room_id: String) -> Result<Vec<RemoteCursor>, String> {
+    let state = COLLAB_STATE.read().await;
+    let room = state.rooms.get(&room_id).ok_or("Room not found")?;
+    Ok(build_remote_cursors(room))
 }

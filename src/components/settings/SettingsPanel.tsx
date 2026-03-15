@@ -23,6 +23,7 @@ export function SettingsPanel() {
   const { theme, settings, updateSettings, setTheme, updateChannel, autoUpdateEnabled, setUpdateChannel } = useExtendedKyroStore();
   const editorOptions = useKyroStore(s => s.settings.editorOptions);
   const setEditorOptions = useKyroStore(s => s.setEditorOptions);
+  const setKyroTheme = useKyroStore(s => s.setTheme);
   const ghostTextConfig = useKyroStore(s => s.ghostTextConfig);
   const setGhostTextConfig = useKyroStore(s => s.setGhostTextConfig);
   const [saving, setSaving] = useState(false);
@@ -45,6 +46,30 @@ export function SettingsPanel() {
         if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
           setTheme(savedTheme);
         }
+
+        setEditorOptions({
+          fontSize: typeof saved.fontSize === 'number' ? saved.fontSize : 14,
+          tabSize: typeof saved.tabSize === 'number' ? saved.tabSize : 4,
+          wordWrap: saved.wordWrap === 'off' || saved.wordWrap === 'bounded' ? saved.wordWrap : 'on',
+          minimap: typeof saved.minimap === 'boolean' ? saved.minimap : true,
+          formatOnSave: typeof saved.formatOnSave === 'boolean' ? saved.formatOnSave : true,
+          autoSave: saved.autoSave === 'off' || saved.autoSave === 'onFocusChange' ? saved.autoSave : 'afterDelay',
+          lineNumbers: saved.lineNumbers === 'off' || saved.lineNumbers === 'relative' ? saved.lineNumbers : 'on',
+          renderWhitespace: saved.renderWhitespace === 'none' || saved.renderWhitespace === 'boundary' || saved.renderWhitespace === 'all'
+            ? saved.renderWhitespace
+            : 'selection',
+          bracketPairColorization: typeof saved.bracketPairColorization === 'boolean' ? saved.bracketPairColorization : true,
+          stickyScroll: typeof saved.stickyScroll === 'boolean' ? saved.stickyScroll : true,
+          inlineSuggest: typeof saved.inlineSuggest === 'boolean' ? saved.inlineSuggest : true,
+        });
+
+        setGhostTextConfig({
+          enabled: typeof saved.ghostTextEnabled === 'boolean' ? saved.ghostTextEnabled : true,
+          temperature: typeof saved.ghostTextTemperature === 'number' ? saved.ghostTextTemperature : ghostTextConfig.temperature,
+          maxTokens: typeof saved.ghostTextMaxTokens === 'number' ? saved.ghostTextMaxTokens : ghostTextConfig.maxTokens,
+          debounceMs: typeof saved.ghostTextDebounceMs === 'number' ? saved.ghostTextDebounceMs : ghostTextConfig.debounceMs,
+          cacheEnabled: typeof saved.ghostTextCacheEnabled === 'boolean' ? saved.ghostTextCacheEnabled : ghostTextConfig.cacheEnabled,
+        });
       })
       .catch(() => {
         // Backend unavailable (web mode) — keep store defaults
@@ -79,8 +104,19 @@ export function SettingsPanel() {
       const payload: Record<string, unknown> = {
         ...settings,
         theme,
+        lineNumbers: editorOptions.lineNumbers,
+        renderWhitespace: editorOptions.renderWhitespace,
+        bracketPairColorization: editorOptions.bracketPairColorization,
+        stickyScroll: editorOptions.stickyScroll,
+        inlineSuggest: editorOptions.inlineSuggest,
+        ghostTextEnabled: ghostTextConfig.enabled,
+        ghostTextTemperature: ghostTextConfig.temperature,
+        ghostTextMaxTokens: ghostTextConfig.maxTokens,
+        ghostTextDebounceMs: ghostTextConfig.debounceMs,
+        ghostTextCacheEnabled: ghostTextConfig.cacheEnabled,
       };
       await invoke('save_settings', { settings: payload });
+      setKyroTheme(theme);
     } catch {
       // Fallback: save to localStorage if backend unavailable
       localStorage.setItem('kyro-settings', JSON.stringify({ ...settings, theme }));

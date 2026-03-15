@@ -5,6 +5,54 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::command;
 
+fn canonicalize_input_path(path: &str) -> Result<PathBuf, String> {
+    let candidate = PathBuf::from(path);
+    if candidate.as_os_str().is_empty() {
+        return Err("Path cannot be empty".to_string());
+    }
+    if candidate.exists() {
+        candidate
+            .canonicalize()
+            .map_err(|e| format!("Failed to resolve path: {}", e))
+    } else {
+        let current_dir = std::env::current_dir()
+            .map_err(|e| format!("Failed to get current directory: {}", e))?;
+        let joined = if candidate.is_absolute() {
+            candidate
+        } else {
+            current_dir.join(candidate)
+        };
+        Ok(joined)
+    }
+}
+
+fn ensure_path_allowed(path: &PathBuf) -> Result<(), String> {
+    let current_dir = std::env::current_dir()
+        .map_err(|e| format!("Failed to get current directory: {}", e))?
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve current directory: {}", e))?;
+
+    if path.starts_with(&current_dir) {
+        return Ok(());
+    }
+
+    let config_dir = get_config_dir()?;
+    if path.starts_with(&config_dir) {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Path '{}' is outside the allowed Kyro workspace",
+        path.display()
+    ))
+}
+
+fn resolve_and_validate_path(path: &str) -> Result<PathBuf, String> {
+    let resolved = canonicalize_input_path(path)?;
+    ensure_path_allowed(&resolved)?;
+    Ok(resolved)
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileNode {
     pub name: String,
@@ -24,7 +72,7 @@ pub struct FileContent {
 
 #[command]
 pub async fn read_file(path: String) -> Result<FileContent, String> {
-    let path = PathBuf::from(&path);
+    let path = resolve_and_validate_path(&path)?;
     let content = fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))?;
     let language = detect_language(&path);
     Ok(FileContent {
@@ -36,7 +84,7 @@ pub async fn read_file(path: String) -> Result<FileContent, String> {
 
 #[command]
 pub async fn write_file(path: String, content: String) -> Result<(), String> {
-    let path = PathBuf::from(&path);
+    let path = resolve_and_validate_path(&path)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create directories: {}", e))?;
     }
@@ -45,7 +93,7 @@ pub async fn write_file(path: String, content: String) -> Result<(), String> {
 
 #[command]
 pub async fn list_directory(path: String) -> Result<Vec<FileNode>, String> {
-    let path = PathBuf::from(&path);
+    let path = resolve_and_validate_path(&path)?;
     let entries = fs::read_dir(&path).map_err(|e| format!("Failed to read directory: {}", e))?;
     let mut nodes = Vec::new();
     for entry in entries {
@@ -74,7 +122,7 @@ pub async fn list_directory(path: String) -> Result<Vec<FileNode>, String> {
 
 #[command]
 pub async fn create_file(path: String) -> Result<(), String> {
-    let path = PathBuf::from(&path);
+    let path = resolve_and_validate_path(&path)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create directories: {}", e))?;
     }
@@ -83,27 +131,33 @@ pub async fn create_file(path: String) -> Result<(), String> {
 
 #[command]
 pub async fn create_directory(path: String) -> Result<(), String> {
+    let path = resolve_and_validate_path(&path)?;
     fs::create_dir_all(&path).map_err(|e| format!("Failed to create directory: {}", e))
 }
 
 #[command]
 pub async fn delete_file(path: String) -> Result<(), String> {
+    let path = resolve_and_validate_path(&path)?;
     fs::remove_file(&path).map_err(|e| format!("Failed to delete file: {}", e))
 }
 
 #[command]
 pub async fn delete_directory(path: String) -> Result<(), String> {
+    let path = resolve_and_validate_path(&path)?;
     fs::remove_dir_all(&path).map_err(|e| format!("Failed to delete directory: {}", e))
 }
 
 #[command]
 pub async fn rename_file(old_path: String, new_path: String) -> Result<(), String> {
+    let old_path = resolve_and_validate_path(&old_path)?;
+    let new_path = resolve_and_validate_path(&new_path)?;
     fs::rename(&old_path, &new_path).map_err(|e| format!("Failed to rename: {}", e))
 }
 
 #[command]
 pub async fn get_file_tree(path: String, max_depth: Option<usize>) -> Result<FileNode, String> {
-    build_file_tree(&PathBuf::from(&path), max_depth.unwrap_or(10))
+    let path = resolve_and_validate_path(&path)?;
+    build_file_tree(&path, max_depth.unwrap_or(10))
 }
 
 fn build_file_tree(path: &PathBuf, depth: usize) -> Result<FileNode, String> {

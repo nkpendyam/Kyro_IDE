@@ -21,6 +21,7 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "type-check": "tsc --noEmit",
+    "typecheck": "pnpm run type-check",
     "verify:prod-config": "node scripts/prod-sanity.mjs --strict",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",

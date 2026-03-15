@@ -161,6 +161,7 @@ export function AIChatSidebar() {
     selectedModel, 
     isOllamaRunning, 
     addChatMessage, 
+    upsertChatMessage,
     clearChatMessages, 
     setAiLoading,
     openFiles,
@@ -251,7 +252,7 @@ export function AIChatSidebar() {
       });
 
       // Update assistant message with full response
-      addChatMessage({
+      upsertChatMessage({
         id: assistantId,
         role: 'assistant',
         content: response.message.content,
@@ -261,7 +262,7 @@ export function AIChatSidebar() {
       });
 
     } catch (error) {
-      addChatMessage({
+      upsertChatMessage({
         id: assistantId,
         role: 'assistant',
         content: `Error: ${error}`,

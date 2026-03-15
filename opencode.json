@@ -1,0 +1,68 @@
+{
+  "$schema": "https://opencode.ai/config.schema.json",
+  "theme": "opencode",
+
+  "providers": {
+    "copilot": {
+      "name": "GitHub Copilot"
+    }
+  },
+
+  "agents": {
+    "coder": {
+      "model": "copilot.gpt-4.1",
+      "maxTokens": 16000
+    },
+    "plan": {
+      "model": "copilot.gpt-4.1",
+      "maxTokens": 8000
+    }
+  },
+
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true
+    },
+    "gh_grep": {
+      "type": "remote",
+      "url": "https://grep.mcp.vercel.app/mcp",
+      "enabled": true
+    },
+    "github": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "enabled": true
+    },
+    "filesystem": {
+      "type": "local",
+      "command": [
+        "npx", "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "."
+      ],
+      "enabled": true
+    }
+  },
+
+  "lsp": {
+    "typescript": {
+      "disabled": false,
+      "command": "typescript-language-server",
+      "args": ["--stdio"]
+    },
+    "rust": {
+      "disabled": false,
+      "command": "rust-analyzer"
+    }
+  },
+
+  "instructions": "AGENTS.md",
+
+  "autoshare": false,
+  "autosummarize": true
+}

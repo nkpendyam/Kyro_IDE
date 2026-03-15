@@ -6,6 +6,7 @@
 use git2::{BlameOptions, DiffOptions, Repository, StashFlags, Status, StatusOptions};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use tauri::command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitStatus {
@@ -90,10 +91,11 @@ impl GitManager {
     pub fn status(&self, path: &str) -> Result<GitStatus, String> {
         let repo = Repository::discover(Path::new(path))
             .map_err(|e| format!("Not a git repository: {}", e))?;
-        let head = repo
+        let branch = repo
             .head()
-            .map_err(|e| format!("Failed to get HEAD: {}", e))?;
-        let branch = head.shorthand().unwrap_or("HEAD").to_string();
+            .ok()
+            .and_then(|head| head.shorthand().map(|value| value.to_string()))
+            .unwrap_or_else(|| "HEAD".to_string());
         let mut opts = StatusOptions::new();
         opts.include_untracked(true).recurse_untracked_dirs(true);
         let statuses = repo
@@ -183,7 +185,9 @@ impl GitManager {
 
         // First pass: collect file-level info from deltas
         for delta_idx in 0..diff.deltas().len() {
-            let delta = diff.get_delta(delta_idx).unwrap();
+            let Some(delta) = diff.get_delta(delta_idx) else {
+                continue;
+            };
             let file_path = delta
                 .new_file()
                 .path()
@@ -501,10 +505,10 @@ impl GitManager {
     pub fn unstage(&self, path: &str, file_path: &str) -> Result<(), String> {
         let repo = Repository::discover(Path::new(path))
             .map_err(|e| format!("Not a git repository: {}", e))?;
-        let head = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
-        match head {
-            Some(tree) => {
-                repo.reset_default(Some(&tree.into_object()), [file_path])
+        let head_commit = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
+        match head_commit {
+            Some(commit) => {
+                repo.reset_default(Some(commit.as_object()), [file_path])
                     .map_err(|e| format!("Failed to unstage file: {}", e))?;
             }
             None => {
@@ -543,10 +547,10 @@ impl GitManager {
     pub fn unstage_all(&self, path: &str) -> Result<(), String> {
         let repo = Repository::discover(Path::new(path))
             .map_err(|e| format!("Not a git repository: {}", e))?;
-        let head = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
-        match head {
-            Some(tree) => {
-                repo.reset_default(Some(&tree.into_object()), ["."])
+        let head_commit = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
+        match head_commit {
+            Some(commit) => {
+                repo.reset(commit.as_object(), git2::ResetType::Mixed, None)
                     .map_err(|e| format!("Failed to unstage all: {}", e))?;
             }
             None => {
@@ -630,5 +634,279 @@ impl GitManager {
 impl Default for GitManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Stage a single file in the repository index.
+#[command]
+pub async fn git_stage(repo_path: String, file_path: String) -> Result<(), String> {
+    GitManager::new().stage(&repo_path, &file_path)
+}
+
+/// Remove a single file from the repository index.
+#[command]
+pub async fn git_unstage(repo_path: String, file_path: String) -> Result<(), String> {
+    GitManager::new().unstage(&repo_path, &file_path)
+}
+
+/// Stage every tracked and untracked change in the repository.
+#[command]
+pub async fn git_stage_all(repo_path: String) -> Result<(), String> {
+    GitManager::new().stage_all(&repo_path)
+}
+
+/// Reset the full index back to HEAD.
+#[command]
+pub async fn git_unstage_all(repo_path: String) -> Result<(), String> {
+    GitManager::new().unstage_all(&repo_path)
+}
+
+/// Discard working tree changes for a single file.
+#[command]
+pub async fn git_discard(repo_path: String, file_path: String) -> Result<(), String> {
+    GitManager::new().discard(&repo_path, &file_path)
+}
+
+/// Stage a single diff hunk for a file.
+#[command]
+pub async fn git_stage_hunk(
+    repo_path: String,
+    file_path: String,
+    hunk_index: usize,
+) -> Result<(), String> {
+    GitManager::new().stage_hunk(&repo_path, &file_path, hunk_index)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+    use git2::{IndexAddOption, Repository, Signature, Status};
+    use tempfile::TempDir;
+
+    fn repo_path(temp_dir: &TempDir) -> String {
+        temp_dir.path().to_string_lossy().into_owned()
+    }
+
+    fn write_file(temp_dir: &TempDir, relative_path: &str, content: &str) -> Result<()> {
+        let full_path = temp_dir.path().join(relative_path);
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(full_path, content)?;
+        Ok(())
+    }
+
+    fn init_repo_with_commit() -> Result<(TempDir, Repository)> {
+        let temp_dir = TempDir::new()?;
+        let repo = Repository::init(temp_dir.path())?;
+        write_file(&temp_dir, "tracked.txt", "one\n")?;
+        commit_all(&repo, "initial commit")?;
+        Ok((temp_dir, repo))
+    }
+
+    fn init_empty_repo() -> Result<(TempDir, Repository)> {
+        let temp_dir = TempDir::new()?;
+        let repo = Repository::init(temp_dir.path())?;
+        Ok((temp_dir, repo))
+    }
+
+    fn commit_all(repo: &Repository, message: &str) -> Result<()> {
+        let mut index = repo.index()?;
+        index.add_all(["."], IndexAddOption::DEFAULT, None)?;
+        index.write()?;
+        let tree_id = index.write_tree()?;
+        let tree = repo.find_tree(tree_id)?;
+        let signature = Signature::now("Kyro Test", "kyro@example.com")?;
+        let parent_commit = repo
+            .head()
+            .ok()
+            .and_then(|head| head.target())
+            .and_then(|oid| repo.find_commit(oid).ok());
+
+        if let Some(parent) = parent_commit {
+            repo.commit(Some("HEAD"), &signature, &signature, message, &tree, &[&parent])?;
+        } else {
+            repo.commit(Some("HEAD"), &signature, &signature, message, &tree, &[])?;
+        }
+
+        Ok(())
+    }
+
+    fn staged_contains(repo: &Repository, relative_path: &str) -> Result<bool> {
+        let mut options = StatusOptions::new();
+        options.include_untracked(true).recurse_untracked_dirs(true);
+        let statuses = repo.statuses(Some(&mut options))?;
+        Ok(statuses.iter().any(|entry| {
+            entry.path() == Some(relative_path)
+                && entry.status().intersects(
+                    Status::INDEX_NEW | Status::INDEX_MODIFIED | Status::INDEX_DELETED,
+                )
+        }))
+    }
+
+    fn unstaged_contains(repo: &Repository, relative_path: &str) -> Result<bool> {
+        let mut options = StatusOptions::new();
+        options.include_untracked(true).recurse_untracked_dirs(true);
+        let statuses = repo.statuses(Some(&mut options))?;
+        Ok(statuses.iter().any(|entry| {
+            entry.path() == Some(relative_path)
+                && entry.status().intersects(
+                    Status::WT_NEW | Status::WT_MODIFIED | Status::WT_DELETED,
+                )
+        }))
+    }
+
+    fn assert_command_ok(result: Result<(), String>) -> Result<()> {
+        result.map_err(anyhow::Error::msg)
+    }
+
+    #[tokio::test]
+    async fn git_stage_stages_new_file() -> Result<()> {
+        let (temp_dir, repo) = init_repo_with_commit()?;
+        write_file(&temp_dir, "new.txt", "hello\n")?;
+
+        assert_command_ok(git_stage(repo_path(&temp_dir), "new.txt".to_string()).await)?;
+
+        assert!(staged_contains(&repo, "new.txt")?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn git_stage_stages_modified_tracked_file() -> Result<()> {
+        let (temp_dir, repo) = init_repo_with_commit()?;
+        write_file(&temp_dir, "tracked.txt", "changed\n")?;
+
+        assert_command_ok(git_stage(repo_path(&temp_dir), "tracked.txt".to_string()).await)?;
+
+        assert!(staged_contains(&repo, "tracked.txt")?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn git_unstage_moves_tracked_file_back_to_worktree() -> Result<()> {
+        let (temp_dir, repo) = init_repo_with_commit()?;
+        write_file(&temp_dir, "tracked.txt", "changed\n")?;
+        assert_command_ok(git_stage(repo_path(&temp_dir), "tracked.txt".to_string()).await)?;
+
+        assert_command_ok(git_unstage(repo_path(&temp_dir), "tracked.txt".to_string()).await)?;
+
+        assert!(!staged_contains(&repo, "tracked.txt")?);
+        assert!(unstaged_contains(&repo, "tracked.txt")?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn git_unstage_removes_new_file_from_index_without_head_commit() -> Result<()> {
+        let (temp_dir, repo) = init_empty_repo()?;
+        write_file(&temp_dir, "draft.txt", "draft\n")?;
+        assert_command_ok(git_stage(repo_path(&temp_dir), "draft.txt".to_string()).await)?;
+
+        assert_command_ok(git_unstage(repo_path(&temp_dir), "draft.txt".to_string()).await)?;
+
+        assert!(!staged_contains(&repo, "draft.txt")?);
+        assert!(unstaged_contains(&repo, "draft.txt")?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn git_stage_all_stages_multiple_files() -> Result<()> {
+        let (temp_dir, repo) = init_repo_with_commit()?;
+        write_file(&temp_dir, "tracked.txt", "changed\n")?;
+        write_file(&temp_dir, "added.txt", "new\n")?;
+
+        assert_command_ok(git_stage_all(repo_path(&temp_dir)).await)?;
+
+        assert!(staged_contains(&repo, "tracked.txt")?);
+        assert!(staged_contains(&repo, "added.txt")?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn git_stage_all_stages_deleted_files() -> Result<()> {
+        let (temp_dir, repo) = init_repo_with_commit()?;
+        std::fs::remove_file(temp_dir.path().join("tracked.txt"))?;
+
+        assert_command_ok(git_stage_all(repo_path(&temp_dir)).await)?;
+
+        assert!(staged_contains(&repo, "tracked.txt")?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn git_unstage_all_resets_multiple_index_entries() -> Result<()> {
+        let (temp_dir, repo) = init_repo_with_commit()?;
+        write_file(&temp_dir, "tracked.txt", "changed\n")?;
+        write_file(&temp_dir, "second.txt", "new\n")?;
+        assert_command_ok(git_stage_all(repo_path(&temp_dir)).await)?;
+
+        assert_command_ok(git_unstage_all(repo_path(&temp_dir)).await)?;
+
+        assert!(!staged_contains(&repo, "tracked.txt")?);
+        assert!(!staged_contains(&repo, "second.txt")?);
+        assert!(unstaged_contains(&repo, "tracked.txt")?);
+        assert!(unstaged_contains(&repo, "second.txt")?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn git_unstage_all_clears_index_without_head_commit() -> Result<()> {
+        let (temp_dir, repo) = init_empty_repo()?;
+        write_file(&temp_dir, "first.txt", "a\n")?;
+        write_file(&temp_dir, "second.txt", "b\n")?;
+        assert_command_ok(git_stage_all(repo_path(&temp_dir)).await)?;
+
+        assert_command_ok(git_unstage_all(repo_path(&temp_dir)).await)?;
+
+        assert!(!staged_contains(&repo, "first.txt")?);
+        assert!(!staged_contains(&repo, "second.txt")?);
+        assert!(unstaged_contains(&repo, "first.txt")?);
+        assert!(unstaged_contains(&repo, "second.txt")?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn git_discard_restores_modified_file_contents() -> Result<()> {
+        let (temp_dir, _repo) = init_repo_with_commit()?;
+        write_file(&temp_dir, "tracked.txt", "changed\n")?;
+
+        assert_command_ok(git_discard(repo_path(&temp_dir), "tracked.txt".to_string()).await)?;
+
+        let restored = std::fs::read_to_string(temp_dir.path().join("tracked.txt"))?;
+        assert_eq!(restored.replace("\r\n", "\n"), "one\n");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn git_discard_restores_deleted_file() -> Result<()> {
+        let (temp_dir, _repo) = init_repo_with_commit()?;
+        std::fs::remove_file(temp_dir.path().join("tracked.txt"))?;
+
+        assert_command_ok(git_discard(repo_path(&temp_dir), "tracked.txt".to_string()).await)?;
+
+        assert!(temp_dir.path().join("tracked.txt").exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn git_stage_hunk_stages_a_valid_hunk_index() -> Result<()> {
+        let (temp_dir, repo) = init_repo_with_commit()?;
+        write_file(&temp_dir, "tracked.txt", "changed\none\n")?;
+
+        assert_command_ok(git_stage_hunk(repo_path(&temp_dir), "tracked.txt".to_string(), 0).await)?;
+
+        assert!(staged_contains(&repo, "tracked.txt")?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn git_stage_hunk_rejects_out_of_range_hunk_index() -> Result<()> {
+        let (temp_dir, _repo) = init_repo_with_commit()?;
+        write_file(&temp_dir, "tracked.txt", "changed\none\n")?;
+
+        let result = git_stage_hunk(repo_path(&temp_dir), "tracked.txt".to_string(), 99).await;
+
+        assert!(result.is_err());
+        Ok(())
     }
 }

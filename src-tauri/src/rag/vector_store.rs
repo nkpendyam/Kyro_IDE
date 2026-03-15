@@ -141,11 +141,11 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use bincode;
 use log::{debug, info};
 use ndarray::Array1;
 use rand::SeedableRng;
 use rand_pcg::Pcg64;
+use serde_json::{from_reader, to_writer};
 use tokio::sync::RwLock;
 
 /// Vector dimension (nomic-embed-text uses 768, all-MiniLM uses 384)
@@ -240,14 +240,14 @@ impl HnswVectorStore {
 
     /// Load vector store from disk
     pub fn load(path: &Path) -> anyhow::Result<Self> {
-        let config_path = path.join("config.bin");
+        let config_path = path.join("config.json");
         let _index_path = path.join("index.bin");
-        let metadata_path = path.join("metadata.bin");
+        let metadata_path = path.join("metadata.json");
 
         let config: VectorStoreConfig = if config_path.exists() {
             let file = std::fs::File::open(&config_path)?;
             let reader = BufReader::new(file);
-            bincode::deserialize_from(reader)?
+            from_reader(reader)?
         } else {
             return Self::new(VectorStoreConfig {
                 storage_path: path.to_path_buf(),
@@ -258,7 +258,7 @@ impl HnswVectorStore {
         let metadata: HashMap<usize, VectorMetadata> = if metadata_path.exists() {
             let file = std::fs::File::open(&metadata_path)?;
             let reader = BufReader::new(file);
-            bincode::deserialize_from(reader)?
+            from_reader(reader)?
         } else {
             HashMap::new()
         };
@@ -297,16 +297,16 @@ impl HnswVectorStore {
         std::fs::create_dir_all(path)?;
 
         // Save config
-        let config_path = path.join("config.bin");
+        let config_path = path.join("config.json");
         let file = std::fs::File::create(&config_path)?;
         let writer = BufWriter::new(file);
-        bincode::serialize_into(writer, &self.config)?;
+        to_writer(writer, &self.config)?;
 
         // Save metadata
-        let metadata_path = path.join("metadata.bin");
+        let metadata_path = path.join("metadata.json");
         let file = std::fs::File::create(&metadata_path)?;
         let writer = BufWriter::new(file);
-        bincode::serialize_into(writer, &self.metadata)?;
+        to_writer(writer, &self.metadata)?;
 
         info!("Saved vector store with {} vectors", self.metadata.len());
         Ok(())

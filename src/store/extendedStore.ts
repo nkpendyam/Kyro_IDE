@@ -95,12 +95,13 @@ export interface Plugin {
 // Update Types
 export interface UpdateInfo {
   version: string;
-  current_version: string;
-  release_date: string;
-  release_notes: string;
+  currentVersion: string;
+  releaseDate?: string | null;
+  releaseNotes: string;
   channel: string;
-  size_mb: number;
+  sizeMb?: number | null;
   mandatory: boolean;
+  target: string;
 }
 
 // ============ Store State ============
@@ -239,10 +240,28 @@ export const useExtendedKyroStore = create<ExtendedKyroState>((set, get) => ({
   login: async (email: string, password: string) => {
     set({ authLoading: true, authError: null });
     try {
-      const response = await invoke<{ user: User; token: string }>('login_user', {
-        request: { email, password }
+      const response = await invoke<{
+        id: string;
+        username: string;
+        email: string;
+        role: string;
+        avatar_url?: string | null;
+      }>('login_user', {
+        username: email,
+        password,
       });
-      set({ user: response.user, isAuthenticated: true, authLoading: false });
+      set({
+        user: {
+          id: response.id,
+          email: response.email,
+          name: response.username,
+          role: response.role,
+          avatar: response.avatar_url ?? undefined,
+          created_at: '',
+        },
+        isAuthenticated: true,
+        authLoading: false,
+      });
     } catch (error) {
       set({ authError: String(error), authLoading: false });
       throw error;
@@ -252,10 +271,29 @@ export const useExtendedKyroStore = create<ExtendedKyroState>((set, get) => ({
   register: async (email: string, password: string, name: string) => {
     set({ authLoading: true, authError: null });
     try {
-      const response = await invoke<{ user: User; token: string }>('register_user', {
-        request: { email, password, name }
+      const response = await invoke<{
+        id: string;
+        username: string;
+        email: string;
+        role: string;
+        avatar_url?: string | null;
+      }>('register_user', {
+        username: name,
+        email,
+        password,
       });
-      set({ user: response.user, isAuthenticated: true, authLoading: false });
+      set({
+        user: {
+          id: response.id,
+          email: response.email,
+          name: response.username,
+          role: response.role,
+          avatar: response.avatar_url ?? undefined,
+          created_at: '',
+        },
+        isAuthenticated: true,
+        authLoading: false,
+      });
     } catch (error) {
       set({ authError: String(error), authLoading: false });
       throw error;
@@ -269,8 +307,26 @@ export const useExtendedKyroStore = create<ExtendedKyroState>((set, get) => ({
 
   checkAuth: async () => {
     try {
-      const user = await invoke<User | null>('get_current_user');
-      set({ user, isAuthenticated: !!user });
+      const user = await invoke<{
+        id: string;
+        username: string;
+        email: string;
+        role: string;
+        avatar_url?: string | null;
+      } | null>('get_current_user');
+      set({
+        user: user
+          ? {
+              id: user.id,
+              email: user.email,
+              name: user.username,
+              role: user.role,
+              avatar: user.avatar_url ?? undefined,
+              created_at: '',
+            }
+          : null,
+        isAuthenticated: !!user,
+      });
     } catch {
       set({ user: null, isAuthenticated: false });
     }
@@ -279,7 +335,7 @@ export const useExtendedKyroStore = create<ExtendedKyroState>((set, get) => ({
   // Collaboration Actions
   createRoom: async (name: string) => {
     const room = await invoke<Room>('create_room', {
-      request: { name, maxUsers: 50, enableE2ee: true }
+      request: { name, max_users: 50, enable_e2ee: true }
     });
     set((state) => ({ rooms: [...state.rooms, room] }));
     return room;
@@ -289,21 +345,16 @@ export const useExtendedKyroStore = create<ExtendedKyroState>((set, get) => ({
     const user = get().user;
     if (!user) throw new Error('Not authenticated');
 
-    await invoke('join_room', {
+    const room = await invoke<Room>('join_room', {
       request: {
-        roomId,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          avatar: user.avatar,
-          color: `#${Math.floor(Math.random()*16777215).toString(16)}`
-        }
+        room_id: roomId,
+        user_id: user.id,
+        username: user.name,
       }
     });
     
     const collaborators = await invoke<Collaborator[]>('get_room_users', { roomId });
-    set({ currentRoom: { id: roomId } as Room, collaborators, collabConnected: true });
+    set({ currentRoom: room, collaborators, collabConnected: true });
   },
 
   leaveRoom: async () => {
@@ -329,8 +380,8 @@ export const useExtendedKyroStore = create<ExtendedKyroState>((set, get) => ({
       presence: {
         user_id: user.id,
         cursor_line: line,
-        cursor_column: column,
-        active_file: file
+        cursor_col: column,
+        status: 'active',
       }
     });
   },
@@ -430,7 +481,7 @@ export const useExtendedKyroStore = create<ExtendedKyroState>((set, get) => ({
   },
 
   installPlugin: async (wasmPath: string) => {
-    await invoke('install_plugin', { request: { wasmPath } });
+    await invoke('install_plugin', { path: wasmPath });
     await get().fetchPlugins();
   },
 

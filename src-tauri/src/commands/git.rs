@@ -65,46 +65,6 @@ pub async fn git_merge(path: String, branch: String) -> Result<String, String> {
     mgr.merge(&path, &branch)
 }
 
-#[command]
-pub async fn git_stage(project_path: String, file_path: String) -> Result<(), String> {
-    let mgr = GitManager::new();
-    mgr.stage(&project_path, &file_path)
-}
-
-#[command]
-pub async fn git_unstage(project_path: String, file_path: String) -> Result<(), String> {
-    let mgr = GitManager::new();
-    mgr.unstage(&project_path, &file_path)
-}
-
-#[command]
-pub async fn git_stage_all(project_path: String) -> Result<(), String> {
-    let mgr = GitManager::new();
-    mgr.stage_all(&project_path)
-}
-
-#[command]
-pub async fn git_unstage_all(project_path: String) -> Result<(), String> {
-    let mgr = GitManager::new();
-    mgr.unstage_all(&project_path)
-}
-
-#[command]
-pub async fn git_discard(project_path: String, file_path: String) -> Result<(), String> {
-    let mgr = GitManager::new();
-    mgr.discard(&project_path, &file_path)
-}
-
-#[command]
-pub async fn git_stage_hunk(
-    project_path: String,
-    file_path: String,
-    hunk_index: usize,
-) -> Result<(), String> {
-    let mgr = GitManager::new();
-    mgr.stage_hunk(&project_path, &file_path, hunk_index)
-}
-
 /// Get diff hunks for a single file (used by DiffViewer and GitStagingPanel)
 #[command]
 pub async fn git_diff_file(path: String) -> Result<Vec<DiffHunk>, String> {

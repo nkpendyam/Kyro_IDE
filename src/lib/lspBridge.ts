@@ -187,9 +187,6 @@ export const __testing = {
 
 // ── Registration Functions ──
 
-let diagnosticTimer: ReturnType<typeof setTimeout> | null = null;
-const disposables: monaco.IDisposable[] = [];
-
 /**
  * Register all LSP providers on a Monaco editor instance.
  * Call this once in handleEditorMount.
@@ -200,6 +197,8 @@ export function registerLspProviders(
   getFilePath: () => string,
   getLanguage: () => string
 ): () => void {
+  let diagnosticTimer: ReturnType<typeof setTimeout> | null = null;
+  const disposables: monaco.IDisposable[] = [];
   // 1. Completion provider (all languages)
   const completionDisposable = monacoModule.languages.registerCompletionItemProvider(
     { pattern: '**' },

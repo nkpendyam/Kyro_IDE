@@ -13,6 +13,28 @@ export interface RagSource {
   preview: string;
 }
 
+export interface ReviewChecklistItem {
+  label: string;
+  checked: boolean;
+  detail?: string | null;
+}
+
+export interface ReviewComment {
+  id: string;
+  severity: 'info' | 'warning' | 'error' | string;
+  title: string;
+  body: string;
+  line?: number | null;
+  suggestion?: string | null;
+}
+
+export interface DiffReviewResult {
+  summary: string;
+  risk: 'low' | 'medium' | 'high' | string;
+  checklist: ReviewChecklistItem[];
+  comments: ReviewComment[];
+}
+
 // Editor Group for split panes
 export interface EditorTab {
   path: string;
@@ -212,7 +234,7 @@ interface KyroState {
   setEditorContent: (content: string) => void; setCursorPosition: (line: number, column: number) => void; setSelectedText: (text: string) => void;
   setDiagnosticCounts: (errors: number, warnings: number) => void;
   setOllamaStatus: (running: boolean) => void; setModels: (models: ModelInfo[]) => void; setSelectedModel: (model: string) => void;
-  addChatMessage: (message: ChatMessage) => void; clearChatMessages: () => void; setAiLoading: (loading: boolean) => void;
+  addChatMessage: (message: ChatMessage) => void; upsertChatMessage: (message: ChatMessage) => void; clearChatMessages: () => void; setAiLoading: (loading: boolean) => void;
   setTerminalOutput: (output: string) => void; appendTerminalOutput: (output: string) => void; setGitStatus: (status: GitStatus | null) => void;
   setSupportedLanguages: (languages: string[]) => void;
   setSidebarWidth: (width: number) => void; setChatWidth: (width: number) => void; toggleChat: () => void; toggleTerminal: () => void; setTerminalHeight: (height: number) => void;
@@ -403,7 +425,18 @@ export const useKyroStore = create<KyroState>((set, get) => ({
   setEditorContent: (content) => set({ editorContent: content }), setCursorPosition: (line, column) => set({ cursorPosition: { line, column } }), setSelectedText: (text) => set({ selectedText: text }),
   setDiagnosticCounts: (errors, warnings) => set({ diagnosticCounts: { errors, warnings } }),
   setOllamaStatus: (running) => set({ isOllamaRunning: running }), setModels: (models) => set({ models }), setSelectedModel: (model) => set({ selectedModel: model }),
-  addChatMessage: (message) => set(state => ({ chatMessages: [...state.chatMessages, message] })), clearChatMessages: () => set({ chatMessages: [] }), setAiLoading: (loading) => set({ isAiLoading: loading }),
+  addChatMessage: (message) => set(state => ({ chatMessages: [...state.chatMessages, message] })),
+  upsertChatMessage: (message) => set(state => {
+    const existingIndex = state.chatMessages.findIndex((entry) => entry.id === message.id);
+    if (existingIndex === -1) {
+      return { chatMessages: [...state.chatMessages, message] };
+    }
+
+    const chatMessages = [...state.chatMessages];
+    chatMessages[existingIndex] = { ...chatMessages[existingIndex], ...message };
+    return { chatMessages };
+  }),
+  clearChatMessages: () => set({ chatMessages: [] }), setAiLoading: (loading) => set({ isAiLoading: loading }),
   setTerminalOutput: (output) => set({ terminalOutput: output }), appendTerminalOutput: (output) => set(state => ({ terminalOutput: state.terminalOutput + output })), setGitStatus: (status) => set({ gitStatus: status }),
   setSupportedLanguages: (languages) => set({ supportedLanguages: languages }),
   setSidebarWidth: (width) => set({ sidebarWidth: width }), setChatWidth: (width) => set({ chatWidth: width }), toggleChat: () => set(state => ({ showChat: !state.showChat })), toggleTerminal: () => set(state => ({ showTerminal: !state.showTerminal })), setTerminalHeight: (height) => set({ terminalHeight: height }),

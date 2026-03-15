@@ -25,6 +25,20 @@ interface DiffHunk {
   lines: DiffLine[];
 }
 
+interface GitDiffHunkResponse {
+  old_start: number;
+  old_lines: number;
+  new_start: number;
+  new_lines: number;
+  header: string;
+  lines: Array<{
+    old_lineno: number | null;
+    new_lineno: number | null;
+    origin: string;
+    content: string;
+  }>;
+}
+
 // Diff line
 interface DiffLine {
   type: 'context' | 'add' | 'delete';
@@ -184,12 +198,23 @@ export function GitStagingPanel({ projectPath, onFileSelect }: GitStagingPanelPr
     onFileSelect?.(filePath);
     
     try {
-      const hunks = await invoke<DiffHunk[]>('git_diff_file', { 
-        projectPath, 
-        filePath,
-        staged: stagedFiles.some(f => f.path === filePath)
+      const hunks = await invoke<GitDiffHunkResponse[]>('git_diff_file', {
+        path: filePath,
       });
-      setDiffHunks(hunks);
+      setDiffHunks(hunks.map((hunk) => ({
+        oldStart: hunk.old_start,
+        oldLines: hunk.old_lines,
+        newStart: hunk.new_start,
+        newLines: hunk.new_lines,
+        header: hunk.header,
+        lines: hunk.lines.map((line) => ({
+          type: line.origin === '+' ? 'add' : line.origin === '-' ? 'delete' : 'context',
+          oldLine: line.old_lineno ?? undefined,
+          newLine: line.new_lineno ?? undefined,
+          content: line.content,
+          selected: false,
+        })),
+      })));
     } catch (e) {
       console.error('Failed to get diff:', e);
       setDiffHunks([]);

@@ -48,7 +48,7 @@ portable-pty = "0.8"
 notify = "6.1"
 
 # ============ Git ============
-git2 = "0.18"
+git2 = "0.20"
 
 # ============ Tree-sitter (Language Parsing) ============
 tree-sitter = "0.24"

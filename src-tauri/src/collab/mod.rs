@@ -10,10 +10,12 @@ pub mod document;
 pub mod sync;
 
 use anyhow::Result;
+use lazy_static::lazy_static;
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tauri::command;
 use tokio::sync::{broadcast, mpsc, RwLock};
 
 pub use awareness::*;
@@ -227,19 +229,25 @@ impl CollabManager {
 
     /// Update cursor position
     pub async fn update_cursor(&mut self, room_id: &str, cursor: CursorPosition) -> Result<()> {
-        if let Some(room) = self.rooms.get_mut(room_id) {
-            if let Some(user) = room.users.get_mut(&self.local_user.id) {
-                user.cursor = Some(cursor.clone());
-                user.last_seen = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-            }
+        let room = self
+            .rooms
+            .get_mut(room_id)
+            .ok_or_else(|| anyhow::anyhow!("Room not found: {}", room_id))?;
 
-            // Update awareness
-            let mut awareness = room.awareness.write().await;
-            awareness.set_local_state_field("cursor", serde_json::to_value(&cursor)?);
-        }
+        let user = room
+            .users
+            .get_mut(&self.local_user.id)
+            .ok_or_else(|| anyhow::anyhow!("Local user not found in room: {}", room_id))?;
+
+        user.cursor = Some(cursor.clone());
+        user.last_seen = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // Update awareness
+        let mut awareness = room.awareness.write().await;
+        awareness.set_local_state_field("cursor", serde_json::to_value(&cursor)?);
 
         // Broadcast cursor update
         let _ = self.broadcast_tx.send(CollabMessage::Cursor {
@@ -384,3 +392,90 @@ impl CollabManager {
 
 /// Shared collaboration manager
 pub type SharedCollabManager = Arc<RwLock<CollabManager>>;
+
+lazy_static! {
+    static ref COMMAND_COLLAB_MANAGER: SharedCollabManager = Arc::new(RwLock::new(
+        CollabManager::new("local-user".to_string(), "Local User".to_string())
+    ));
+}
+
+async fn apply_broadcast_cursor(
+    manager: &mut CollabManager,
+    room_id: &str,
+    cursor: CursorPosition,
+) -> Result<()> {
+    if manager.get_room_users(room_id).is_none() {
+        manager.join_room(room_id).await?;
+    }
+
+    manager.update_cursor(room_id, cursor).await
+}
+
+/// Broadcast the local user's cursor position within a collaboration room.
+#[command]
+pub async fn broadcast_cursor(room_id: String, cursor: CursorPosition) -> Result<(), String> {
+    let mut collab_manager = COMMAND_COLLAB_MANAGER.write().await;
+    apply_broadcast_cursor(&mut collab_manager, &room_id, cursor)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+
+    #[tokio::test]
+    async fn broadcast_cursor_updates_cursor_for_existing_room() -> Result<()> {
+        let mut manager = CollabManager::new("user-1".to_string(), "Alice".to_string());
+        manager.join_room("room-1").await?;
+
+        apply_broadcast_cursor(
+            &mut manager,
+            "room-1",
+            super::CursorPosition {
+                line: 7,
+                column: 3,
+                file: Some("src/main.rs".to_string()),
+            },
+        )
+        .await?;
+
+        let users = manager
+            .get_room_users("room-1")
+            .ok_or_else(|| anyhow::anyhow!("room should exist"))?;
+        let current_user = users.iter().find(|user| user.id == "user-1");
+
+        assert!(current_user.is_some());
+        assert_eq!(
+            current_user
+                .and_then(|user| user.cursor.clone())
+                .map(|cursor| cursor.line),
+            Some(7)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn broadcast_cursor_creates_room_when_missing() -> Result<()> {
+        let mut manager = CollabManager::new("user-1".to_string(), "Alice".to_string());
+
+        apply_broadcast_cursor(
+            &mut manager,
+            "missing-room",
+            super::CursorPosition {
+                line: 1,
+                column: 1,
+                file: None,
+            },
+        )
+        .await?;
+
+        let users = manager
+            .get_room_users("missing-room")
+            .ok_or_else(|| anyhow::anyhow!("room should be created"))?;
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].cursor.as_ref().map(|cursor| cursor.column), Some(1));
+        Ok(())
+    }
+}

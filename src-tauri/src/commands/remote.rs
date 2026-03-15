@@ -44,25 +44,25 @@ pub async fn remote_connect(
     host: String,
     config: HashMap<String, String>,
 ) -> Result<String, String> {
-    match connection_type.as_str() {
+    let id = match connection_type.as_str() {
         "ssh" => connect_ssh(&host, &config),
         "devcontainer" => connect_devcontainer(&host, &config),
         "wsl" => connect_wsl(&host, &config),
         other => Err(format!("Unknown connection type: {other}")),
+    }?;
+
+    if let Ok(mut map) = state.0.lock() {
+        map.insert(
+            id.clone(),
+            ConnectionInfo {
+                id: id.clone(),
+                connection_type,
+                host,
+            },
+        );
     }
-    .map(|id| {
-        if let Ok(mut map) = state.0.lock() {
-            map.insert(
-                id.clone(),
-                ConnectionInfo {
-                    id: id.clone(),
-                    connection_type,
-                    host,
-                },
-            );
-        }
-        id
-    })
+
+    Ok(id)
 }
 
 /// Tear down a previously established connection.

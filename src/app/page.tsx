@@ -128,6 +128,7 @@ export default function Home() {
     setAgentRunning,
     chatMessages,
     settings,
+    showTerminal,
   } = useKyroStore();
 
   useEffect(() => {
@@ -193,9 +194,9 @@ export default function Home() {
     }
   }, [currentFile]);
 
-  // Auto-save: save dirty files after 1 second of inactivity
+  // Auto-save after a delay only when configured.
   React.useEffect(() => {
-    if (!settings?.editorOptions?.autoSave || settings.editorOptions.autoSave === 'off') return;
+    if (settings?.editorOptions?.autoSave !== 'afterDelay') return;
 
     const timer = setTimeout(() => {
       const state = useKyroStore.getState();
@@ -307,14 +308,27 @@ export default function Home() {
   const handleRestoreCheckpoint = useCallback((id: string) => {
     const cp = checkpoints.find(c => c.id === id);
     if (cp) {
-      cp.fileSnapshots.forEach((content, path) => {
-        const existing = openFiles.find(f => f.path === path);
-        if (existing) {
-          setEditorContent(content);
+      const restoredFiles = openFiles.map((file) => {
+        const restoredContent = cp.fileSnapshots.get(file.path);
+        if (typeof restoredContent !== 'string') {
+          return file;
         }
+
+        return {
+          ...file,
+          content: restoredContent,
+          isDirty: restoredContent !== file.content,
+        };
       });
+
+      useKyroStore.setState({ openFiles: restoredFiles });
+
+      const activeFile = activeFileIndex >= 0 ? restoredFiles[activeFileIndex] : null;
+      if (activeFile) {
+        setEditorContent(activeFile.content);
+      }
     }
-  }, [checkpoints, openFiles, setEditorContent]);
+  }, [activeFileIndex, checkpoints, openFiles, setEditorContent]);
 
   const handleDeleteCheckpoint = useCallback((id: string) => {
     setCheckpoints(prev => prev.filter(c => c.id !== id));
@@ -410,6 +424,7 @@ export default function Home() {
               { id: 'explorer' as SidebarPanel, icon: Files, label: 'Explorer' },
               { id: 'search' as SidebarPanel, icon: Search, label: 'Search' },
               { id: 'git' as SidebarPanel, icon: GitBranch, label: 'Source Control' },
+              { id: 'review' as SidebarPanel, icon: Shield, label: 'PR Review' },
               { id: 'debug' as SidebarPanel, icon: Bug, label: 'Debug' },
               { id: 'extensions' as SidebarPanel, icon: Blocks, label: 'Extensions' },
               { id: 'collaboration' as SidebarPanel, icon: Users, label: 'Collaboration' },
@@ -424,7 +439,6 @@ export default function Home() {
               { id: 'browser' as SidebarPanel, icon: Globe, label: 'Browser Preview' },
               { id: 'rules' as SidebarPanel, icon: BookOpen, label: 'Project Rules' },
               { id: 'autopilot' as SidebarPanel, icon: Shield, label: 'Agent Autopilot' },
-              { id: 'review' as SidebarPanel, icon: Shield, label: 'PR Review' },
               { id: 'remote' as SidebarPanel, icon: Monitor, label: 'Remote / Containers' },
               { id: 'mission' as SidebarPanel, icon: Rocket, label: 'Mission Control' },
             ].map((item) => {
@@ -464,6 +478,7 @@ export default function Home() {
                 {activePanel === 'explorer' && 'Explorer'}
                 {activePanel === 'search' && 'Search'}
                 {activePanel === 'git' && 'Source Control'}
+                {activePanel === 'review' && 'PR Review'}
                 {activePanel === 'debug' && 'Debug'}
                 {activePanel === 'extensions' && 'Extensions'}
                 {activePanel === 'settings' && 'Settings'}
@@ -479,7 +494,6 @@ export default function Home() {
                 {activePanel === 'browser' && 'Browser Preview'}
                 {activePanel === 'rules' && 'Project Rules'}
                 {activePanel === 'autopilot' && 'Agent Autopilot'}
-                {activePanel === 'review' && 'PR Review'}
                 {activePanel === 'remote' && 'Remote / Containers'}
               </span>
             </div>
@@ -577,6 +591,7 @@ export default function Home() {
                   onSave={handleSaveFile}
                   roomId={currentRoom?.id}
                   currentUserId={user?.id}
+                  currentUserName={user?.name}
                 />
               </div>
 
@@ -600,6 +615,7 @@ export default function Home() {
             </div>
 
             {/* Terminal Panel */}
+            {showTerminal && (
             <div className="h-40 border-t border-[#30363d]">
               <TerminalAI
                 terminalOutput={useKyroStore.getState().terminalOutput}
@@ -614,6 +630,7 @@ export default function Home() {
               />
               <TerminalPanel />
             </div>
+            )}
           </div>
         </div>
       )}

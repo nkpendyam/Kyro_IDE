@@ -29,6 +29,7 @@ interface EditorPresenceProps {
   roomId?: string;
   // Current user ID
   currentUserId?: string;
+  currentUserName?: string;
 }
 
 // User colors for cursors
@@ -118,7 +119,8 @@ function RemoteCursorWidget({
 export function EditorPresence({ 
   editorContainerRef,
   roomId,
-  currentUserId 
+  currentUserId,
+  currentUserName,
 }: EditorPresenceProps) {
   const [cursors, setCursors] = useState<RemoteCursor[]>([]);
   const [lineHeight, setLineHeight] = useState(19);
@@ -176,13 +178,14 @@ export function EditorPresence({
     if (!roomId || !currentUserId) return;
     
     try {
-      await invoke('broadcast_cursor', {
-        roomId,
-        cursor: {
-          line,
-          column,
-        }
-      });
+        await invoke('broadcast_cursor', {
+          roomId,
+          cursor: {
+            line,
+            column,
+            userId: currentUserId ?? currentUserName,
+          }
+        });
     } catch (e) {
       console.error('Failed to broadcast cursor:', e);
     }

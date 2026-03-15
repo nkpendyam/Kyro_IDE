@@ -15,9 +15,10 @@ export interface CodeEditorProps {
   onSave?: () => void;
   roomId?: string;
   currentUserId?: string;
+  currentUserName?: string;
 }
 
-export function CodeEditor({ onSave, roomId, currentUserId }: CodeEditorProps) {
+export function CodeEditor({ onSave, roomId, currentUserId, currentUserName }: CodeEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null);
@@ -267,6 +268,7 @@ export function CodeEditor({ onSave, roomId, currentUserId }: CodeEditorProps) {
           editorContainerRef={containerRef as React.RefObject<HTMLDivElement>}
           roomId={roomId}
           currentUserId={currentUserId}
+          currentUserName={currentUserName}
         />
       </div>
     </div>

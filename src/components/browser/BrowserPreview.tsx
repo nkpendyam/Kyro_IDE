@@ -12,8 +12,32 @@ export function BrowserPreview({ url: initialUrl }: BrowserPreviewProps) {
   const [inputUrl, setInputUrl] = useState(url);
   const [key, setKey] = useState(0);
 
+  const normalizePreviewUrl = (value: string): string | null => {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const withProtocol = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed)
+      ? trimmed
+      : `http://${trimmed}`;
+
+    try {
+      const parsed = new URL(withProtocol);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        return null;
+      }
+      return parsed.toString();
+    } catch {
+      return null;
+    }
+  };
+
   const navigate = () => {
-    setUrl(inputUrl);
+    const normalizedUrl = normalizePreviewUrl(inputUrl);
+    if (!normalizedUrl) {
+      return;
+    }
+    setInputUrl(normalizedUrl);
+    setUrl(normalizedUrl);
     setKey(prev => prev + 1);
   };
 
@@ -49,13 +73,20 @@ export function BrowserPreview({ url: initialUrl }: BrowserPreviewProps) {
 
       {/* Preview iframe */}
       <div className="flex-1 relative">
-        <iframe
-          key={key}
-          src={url}
-          className="w-full h-full border-0"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-          title="Browser Preview"
-        />
+        {normalizePreviewUrl(url) ? (
+          <iframe
+            key={key}
+            src={url}
+            className="w-full h-full border-0"
+            sandbox="allow-scripts allow-forms"
+            referrerPolicy="no-referrer"
+            title="Browser Preview"
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-[#8b949e]">
+            Enter a valid `http` or `https` URL to preview it safely.
+          </div>
+        )}
       </div>
     </div>
   );

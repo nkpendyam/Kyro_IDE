@@ -19,6 +19,19 @@ interface DiffHunk {
   lines: DiffLine[];
 }
 
+interface GitDiffHunkResponse {
+  old_start: number;
+  old_lines: number;
+  new_start: number;
+  new_lines: number;
+  lines: Array<{
+    old_lineno: number | null;
+    new_lineno: number | null;
+    origin: string;
+    content: string;
+  }>;
+}
+
 interface DiffViewerProps {
   filePath?: string;
   mode: 'inline' | 'side-by-side';
@@ -39,8 +52,19 @@ export function DiffViewer({ filePath, mode = 'inline' }: DiffViewerProps) {
     const loadDiff = async () => {
       setIsLoading(true);
       try {
-        const diffResult = await invoke<DiffHunk[]>('git_diff_file', { path: filePath });
-        setDiff(diffResult);
+        const diffResult = await invoke<GitDiffHunkResponse[]>('git_diff_file', { path: filePath });
+        setDiff(diffResult.map((hunk) => ({
+          oldStart: hunk.old_start,
+          oldLines: hunk.old_lines,
+          newStart: hunk.new_start,
+          newLines: hunk.new_lines,
+          lines: hunk.lines.map((line) => ({
+            oldLineNumber: line.old_lineno,
+            newLineNumber: line.new_lineno,
+            type: line.origin === '+' ? 'added' : line.origin === '-' ? 'removed' : 'unchanged',
+            content: line.content,
+          })),
+        })));
       } catch (error) {
         console.error('Error loading diff:', error);
         setDiff([]);
