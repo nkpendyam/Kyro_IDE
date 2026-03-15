@@ -4,7 +4,7 @@ use crate::lsp::completion_engine::{
     AiCompletionEngine, CompletionContext, CompletionStats, CompletionTriggerKind,
     PERFORMANCE_BUDGET_MS,
 };
-use crate::lsp::{CompletionItem, Diagnostic, MolecularLsp, Symbol};
+use crate::lsp::{CompletionItem, Diagnostic, Import, MolecularLsp, Symbol};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{command, State};
@@ -13,6 +13,12 @@ use tokio::sync::Mutex;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SymbolsResponse {
     pub symbols: Vec<Symbol>,
+    pub language: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ImportsResponse {
+    pub imports: Vec<Import>,
     pub language: String,
 }
 
@@ -74,6 +80,17 @@ pub async fn extract_symbols(
     let lsp = lsp.lock().await;
     let symbols = lsp.extract_symbols(&language, &code);
     Ok(SymbolsResponse { symbols, language })
+}
+
+#[command]
+pub async fn extract_imports(
+    lsp: State<'_, Arc<Mutex<MolecularLsp>>>,
+    language: String,
+    code: String,
+) -> Result<ImportsResponse, String> {
+    let lsp = lsp.lock().await;
+    let imports = lsp.extract_imports(&language, &code);
+    Ok(ImportsResponse { imports, language })
 }
 
 #[command]

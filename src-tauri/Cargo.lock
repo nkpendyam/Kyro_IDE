@@ -3464,6 +3464,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "shellexpand",
+ "streaming-iterator",
  "sysinfo",
  "tar",
  "tauri",

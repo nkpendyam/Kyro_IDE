@@ -23,8 +23,10 @@ pub mod wasm_loader;
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use streaming_iterator::StreamingIterator;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tree_sitter::{Language, Node, Parser, Query, QueryCursor};
 
 /// Supported languages with their file extensions (165+ languages)
 pub const SUPPORTED_LANGUAGES: &[(&str, &[&str])] = &[
@@ -232,6 +234,13 @@ pub struct Symbol {
     pub end_line: usize,
     pub end_col: usize,
     pub documentation: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Import {
+    pub path: String,
+    pub items: Vec<String>,
+    pub line: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -478,192 +487,22 @@ impl MolecularLsp {
         self.configs.get(language)
     }
 
-    /// Extract symbols from code (functions, classes, etc.)
+    /// Extract symbols from code with tree-sitter queries when available.
     pub fn extract_symbols(&self, language: &str, code: &str) -> Vec<Symbol> {
-        let mut symbols = Vec::new();
-
-        let config = match self.get_config(language) {
-            Some(c) => c,
-            None => return symbols,
-        };
-
-        let lines: Vec<&str> = code.lines().collect();
-
-        for (line_num, line) in lines.iter().enumerate() {
-            let trimmed = line.trim();
-
-            // Skip comments
-            if trimmed.starts_with(&config.comment_prefix) {
-                continue;
-            }
-
-            // Language-specific symbol detection
-            match language {
-                "rust" => {
-                    // Detect functions: fn name(
-                    if trimmed.starts_with("fn ")
-                        || trimmed.starts_with("pub fn ")
-                        || trimmed.starts_with("async fn ")
-                    {
-                        if let Some(name) = extract_name_after_keyword(trimmed, "fn") {
-                            symbols.push(Symbol {
-                                name,
-                                kind: SymbolKind::Function,
-                                start_line: line_num + 1,
-                                start_col: line.find("fn ").unwrap_or(0) + 1,
-                                end_line: line_num + 1,
-                                end_col: line.len(),
-                                documentation: None,
-                            });
-                        }
-                    }
-                    // Detect structs: struct Name
-                    else if trimmed.contains("struct ") {
-                        if let Some(name) = extract_name_after_keyword(trimmed, "struct") {
-                            symbols.push(Symbol {
-                                name,
-                                kind: SymbolKind::Struct,
-                                start_line: line_num + 1,
-                                start_col: line.find("struct ").unwrap_or(0) + 1,
-                                end_line: line_num + 1,
-                                end_col: line.len(),
-                                documentation: None,
-                            });
-                        }
-                    }
-                    // Detect enums: enum Name
-                    else if trimmed.contains("enum ") {
-                        if let Some(name) = extract_name_after_keyword(trimmed, "enum") {
-                            symbols.push(Symbol {
-                                name,
-                                kind: SymbolKind::Enum,
-                                start_line: line_num + 1,
-                                start_col: line.find("enum ").unwrap_or(0) + 1,
-                                end_line: line_num + 1,
-                                end_col: line.len(),
-                                documentation: None,
-                            });
-                        }
-                    }
-                }
-                "python" => {
-                    // Detect functions: def name(
-                    if trimmed.starts_with("def ") || trimmed.starts_with("async def ") {
-                        if let Some(name) = extract_name_after_keyword(trimmed, "def") {
-                            symbols.push(Symbol {
-                                name,
-                                kind: SymbolKind::Function,
-                                start_line: line_num + 1,
-                                start_col: line.find("def ").unwrap_or(0) + 1,
-                                end_line: line_num + 1,
-                                end_col: line.len(),
-                                documentation: None,
-                            });
-                        }
-                    }
-                    // Detect classes: class Name
-                    else if trimmed.starts_with("class ") {
-                        if let Some(name) = extract_name_after_keyword(trimmed, "class") {
-                            symbols.push(Symbol {
-                                name,
-                                kind: SymbolKind::Class,
-                                start_line: line_num + 1,
-                                start_col: line.find("class ").unwrap_or(0) + 1,
-                                end_line: line_num + 1,
-                                end_col: line.len(),
-                                documentation: None,
-                            });
-                        }
-                    }
-                }
-                "javascript" | "typescript" => {
-                    // Detect functions: function name(, const name =, name =>
-                    if trimmed.contains("function ") {
-                        if let Some(name) = extract_name_after_keyword(trimmed, "function") {
-                            symbols.push(Symbol {
-                                name,
-                                kind: SymbolKind::Function,
-                                start_line: line_num + 1,
-                                start_col: 1,
-                                end_line: line_num + 1,
-                                end_col: line.len(),
-                                documentation: None,
-                            });
-                        }
-                    }
-                    // Detect classes: class Name
-                    else if trimmed.starts_with("class ") || trimmed.starts_with("export class ")
-                    {
-                        if let Some(name) = extract_name_after_keyword(trimmed, "class") {
-                            symbols.push(Symbol {
-                                name,
-                                kind: SymbolKind::Class,
-                                start_line: line_num + 1,
-                                start_col: 1,
-                                end_line: line_num + 1,
-                                end_col: line.len(),
-                                documentation: None,
-                            });
-                        }
-                    }
-                    // Detect arrow functions and const functions
-                    else if (trimmed.starts_with("const ") || trimmed.starts_with("let "))
-                        && (trimmed.contains("=>")
-                            || trimmed.contains("= (")
-                            || trimmed.contains("= async"))
-                    {
-                        let name = trimmed
-                            .split_whitespace()
-                            .nth(1)
-                            .map(|s| s.trim_end_matches(':').trim_end_matches('=').to_string());
-                        if let Some(name) = name {
-                            symbols.push(Symbol {
-                                name,
-                                kind: SymbolKind::Function,
-                                start_line: line_num + 1,
-                                start_col: 1,
-                                end_line: line_num + 1,
-                                end_col: line.len(),
-                                documentation: None,
-                            });
-                        }
-                    }
-                }
-                "go" => {
-                    // Detect functions: func Name(
-                    if trimmed.starts_with("func ") {
-                        if let Some(name) = extract_name_after_keyword(trimmed, "func") {
-                            symbols.push(Symbol {
-                                name,
-                                kind: SymbolKind::Function,
-                                start_line: line_num + 1,
-                                start_col: 1,
-                                end_line: line_num + 1,
-                                end_col: line.len(),
-                                documentation: None,
-                            });
-                        }
-                    }
-                    // Detect structs: type Name struct
-                    else if trimmed.contains("struct") && trimmed.starts_with("type ") {
-                        if let Some(name) = extract_name_after_keyword(trimmed, "type") {
-                            symbols.push(Symbol {
-                                name,
-                                kind: SymbolKind::Struct,
-                                start_line: line_num + 1,
-                                start_col: 1,
-                                end_line: line_num + 1,
-                                end_col: line.len(),
-                                documentation: None,
-                            });
-                        }
-                    }
-                }
-                _ => {}
-            }
+        if let Some(parsed) = parse_with_queries(language, code) {
+            return parsed.symbols;
         }
 
-        symbols
+        extract_symbols_legacy(language, code, self.get_config(language))
+    }
+
+    /// Extract imports from code with tree-sitter queries when available.
+    pub fn extract_imports(&self, language: &str, code: &str) -> Vec<Import> {
+        if let Some(parsed) = parse_with_queries(language, code) {
+            return parsed.imports;
+        }
+
+        extract_imports_legacy(language, code)
     }
 
     /// Get completions for code at position
@@ -874,7 +713,401 @@ fn extract_name_after_keyword(line: &str, keyword: &str) -> Option<String> {
     }
 }
 
-#[cfg(all(test, feature = "fixme_tests"))]
+struct ParsedQueryResult {
+    symbols: Vec<Symbol>,
+    imports: Vec<Import>,
+}
+
+fn parse_with_queries(language: &str, code: &str) -> Option<ParsedQueryResult> {
+    let (ts_language, symbol_query, import_query) = query_bundle(language)?;
+    let mut parser = Parser::new();
+    parser.set_language(&ts_language).ok()?;
+    let tree = parser.parse(code, None)?;
+    let root = tree.root_node();
+    let source = code.as_bytes();
+
+    let symbol_query = Query::new(&ts_language, symbol_query).ok()?;
+    let import_query = Query::new(&ts_language, import_query).ok()?;
+
+    let symbols = collect_symbol_matches(&symbol_query, root, source);
+    let imports = collect_import_matches(&import_query, root, source);
+
+    Some(ParsedQueryResult { symbols, imports })
+}
+
+fn query_bundle(language: &str) -> Option<(Language, &'static str, &'static str)> {
+    match language {
+        "rust" => Some((
+            tree_sitter_rust::LANGUAGE.into(),
+            RUST_SYMBOL_QUERY,
+            RUST_IMPORT_QUERY,
+        )),
+        "python" => Some((
+            tree_sitter_python::LANGUAGE.into(),
+            PYTHON_SYMBOL_QUERY,
+            PYTHON_IMPORT_QUERY,
+        )),
+        "typescript" | "tsx" | "javascript" | "jsx" => Some((
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            TS_SYMBOL_QUERY,
+            TS_IMPORT_QUERY,
+        )),
+        "go" => Some((
+            tree_sitter_go::LANGUAGE.into(),
+            GO_SYMBOL_QUERY,
+            GO_IMPORT_QUERY,
+        )),
+        _ => None,
+    }
+}
+
+fn collect_symbol_matches(query: &Query, root: Node<'_>, source: &[u8]) -> Vec<Symbol> {
+    let mut cursor = QueryCursor::new();
+    let mut symbols = Vec::new();
+    let capture_names = query.capture_names();
+    let mut docs_by_row: HashMap<usize, String> = HashMap::new();
+
+    let mut matches = cursor.matches(query, root, source);
+    while let Some(query_match) = matches.next() {
+        let mut name = None;
+        let mut kind = None;
+        let mut start = None;
+        let mut end = None;
+        let mut documentation = None;
+
+        for capture in query_match.captures {
+            let capture_name = capture_names[capture.index as usize];
+            match capture_name {
+                "doc" => {
+                    let text = node_text(capture.node, source);
+                    let cleaned = text.trim().to_string();
+                    if !cleaned.is_empty() {
+                        docs_by_row.insert(capture.node.end_position().row + 2, cleaned);
+                        documentation = Some(text.trim().to_string());
+                    }
+                }
+                "name" => name = Some(node_text(capture.node, source)),
+                "kind.function" => kind = Some(SymbolKind::Function),
+                "kind.method" => kind = Some(SymbolKind::Method),
+                "kind.class" => kind = Some(SymbolKind::Class),
+                "kind.struct" => kind = Some(SymbolKind::Struct),
+                "kind.interface" => kind = Some(SymbolKind::Interface),
+                "kind.enum" => kind = Some(SymbolKind::Enum),
+                "kind.constant" => kind = Some(SymbolKind::Constant),
+                "kind.module" => kind = Some(SymbolKind::Module),
+                "kind.type" => kind = Some(SymbolKind::Type),
+                "kind.macro" => kind = Some(SymbolKind::Macro),
+                "kind.variable" => kind = Some(SymbolKind::Variable),
+                "definition" => {
+                    start = Some(capture.node.start_position());
+                    end = Some(capture.node.end_position());
+                }
+                _ => {}
+            }
+        }
+
+        if let (Some(name), Some(kind), Some(start), Some(end)) = (name, kind, start, end) {
+            symbols.push(Symbol {
+                documentation: documentation.or_else(|| docs_by_row.get(&(start.row + 1)).cloned()),
+                name,
+                kind,
+                start_line: start.row + 1,
+                start_col: start.column + 1,
+                end_line: end.row + 1,
+                end_col: end.column + 1,
+            });
+        }
+    }
+
+    dedupe_symbols(symbols)
+}
+
+fn collect_import_matches(query: &Query, root: Node<'_>, source: &[u8]) -> Vec<Import> {
+    let mut cursor = QueryCursor::new();
+    let capture_names = query.capture_names();
+    let mut imports = Vec::new();
+
+    let mut matches = cursor.matches(query, root, source);
+    while let Some(query_match) = matches.next() {
+        let mut path = None;
+        let mut items = Vec::new();
+        let mut line = None;
+
+        for capture in query_match.captures {
+            let capture_name = capture_names[capture.index as usize];
+            match capture_name {
+                "path" => {
+                    let text = node_text(capture.node, source).trim().trim_matches('"').trim_matches('"').trim_matches('\'').to_string();
+                    if !text.is_empty() {
+                        path = Some(text);
+                    }
+                    line = Some(capture.node.start_position().row + 1);
+                }
+                "item" => {
+                    let text = node_text(capture.node, source).trim().to_string();
+                    if !text.is_empty() {
+                        items.push(text);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(path) = path {
+            imports.push(Import {
+                path,
+                items,
+                line: line.unwrap_or(1),
+            });
+        }
+    }
+
+    dedupe_imports(imports)
+}
+
+fn dedupe_symbols(symbols: Vec<Symbol>) -> Vec<Symbol> {
+    let mut deduped = Vec::new();
+    for symbol in symbols {
+        if let Some(existing) = deduped.iter_mut().find(|existing: &&mut Symbol| {
+            existing.name == symbol.name
+                && existing.kind == symbol.kind
+                && existing.start_line == symbol.start_line
+        }) {
+            if existing.documentation.is_none() && symbol.documentation.is_some() {
+                existing.documentation = symbol.documentation.clone();
+            }
+            continue;
+        }
+        deduped.push(symbol);
+    }
+    deduped
+}
+
+fn dedupe_imports(imports: Vec<Import>) -> Vec<Import> {
+    let mut deduped = Vec::new();
+    for import in imports {
+        if deduped.iter().any(|existing: &Import| {
+            existing.path == import.path
+                && existing.items == import.items
+                && existing.line == import.line
+        }) {
+            continue;
+        }
+        deduped.push(import);
+    }
+    deduped
+}
+
+fn node_text(node: Node<'_>, source: &[u8]) -> String {
+    String::from_utf8_lossy(&source[node.start_byte()..node.end_byte()]).to_string()
+}
+
+fn extract_symbols_legacy(
+    language: &str,
+    code: &str,
+    config: Option<&LanguageConfig>,
+) -> Vec<Symbol> {
+    let mut symbols = Vec::new();
+    let Some(config) = config else {
+        return symbols;
+    };
+
+    let lines: Vec<&str> = code.lines().collect();
+    for (line_num, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with(&config.comment_prefix) {
+            continue;
+        }
+
+        match language {
+            "rust" => {
+                if trimmed.starts_with("fn ")
+                    || trimmed.starts_with("pub fn ")
+                    || trimmed.starts_with("async fn ")
+                {
+                    if let Some(name) = extract_name_after_keyword(trimmed, "fn") {
+                        symbols.push(Symbol {
+                            name,
+                            kind: SymbolKind::Function,
+                            start_line: line_num + 1,
+                            start_col: line.find("fn ").unwrap_or(0) + 1,
+                            end_line: line_num + 1,
+                            end_col: line.len(),
+                            documentation: None,
+                        });
+                    }
+                } else if trimmed.contains("struct ") {
+                    if let Some(name) = extract_name_after_keyword(trimmed, "struct") {
+                        symbols.push(Symbol {
+                            name,
+                            kind: SymbolKind::Struct,
+                            start_line: line_num + 1,
+                            start_col: line.find("struct ").unwrap_or(0) + 1,
+                            end_line: line_num + 1,
+                            end_col: line.len(),
+                            documentation: None,
+                        });
+                    }
+                } else if trimmed.contains("enum ") {
+                    if let Some(name) = extract_name_after_keyword(trimmed, "enum") {
+                        symbols.push(Symbol {
+                            name,
+                            kind: SymbolKind::Enum,
+                            start_line: line_num + 1,
+                            start_col: line.find("enum ").unwrap_or(0) + 1,
+                            end_line: line_num + 1,
+                            end_col: line.len(),
+                            documentation: None,
+                        });
+                    }
+                }
+            }
+            "python" => {
+                if trimmed.starts_with("def ") || trimmed.starts_with("async def ") {
+                    if let Some(name) = extract_name_after_keyword(trimmed, "def") {
+                        symbols.push(Symbol {
+                            name,
+                            kind: SymbolKind::Function,
+                            start_line: line_num + 1,
+                            start_col: line.find("def ").unwrap_or(0) + 1,
+                            end_line: line_num + 1,
+                            end_col: line.len(),
+                            documentation: None,
+                        });
+                    }
+                } else if trimmed.starts_with("class ") {
+                    if let Some(name) = extract_name_after_keyword(trimmed, "class") {
+                        symbols.push(Symbol {
+                            name,
+                            kind: SymbolKind::Class,
+                            start_line: line_num + 1,
+                            start_col: line.find("class ").unwrap_or(0) + 1,
+                            end_line: line_num + 1,
+                            end_col: line.len(),
+                            documentation: None,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    symbols
+}
+
+fn extract_imports_legacy(language: &str, code: &str) -> Vec<Import> {
+    let mut imports = Vec::new();
+    for (index, line) in code.lines().enumerate() {
+        let trimmed = line.trim();
+        match language {
+            "rust" if trimmed.starts_with("use ") => imports.push(Import {
+                path: trimmed.trim_start_matches("use ").trim_end_matches(';').to_string(),
+                items: Vec::new(),
+                line: index + 1,
+            }),
+            "python" if trimmed.starts_with("import ") || trimmed.starts_with("from ") => imports.push(Import {
+                path: trimmed.to_string(),
+                items: Vec::new(),
+                line: index + 1,
+            }),
+            "typescript" | "javascript" if trimmed.starts_with("import ") => imports.push(Import {
+                path: trimmed.to_string(),
+                items: Vec::new(),
+                line: index + 1,
+            }),
+            _ => {}
+        }
+    }
+    imports
+}
+
+const RUST_SYMBOL_QUERY: &str = r#"
+((line_comment) @doc
+  .
+  (function_item
+    name: (identifier) @name) @definition @kind.function)
+
+((line_comment) @doc
+  .
+  (struct_item
+    name: (type_identifier) @name) @definition @kind.struct)
+
+((line_comment) @doc
+  .
+  (enum_item
+    name: (type_identifier) @name) @definition @kind.enum)
+
+((line_comment) @doc
+  .
+  (trait_item
+    name: (type_identifier) @name) @definition @kind.interface)
+
+((line_comment) @doc
+  .
+  (type_item
+    name: (type_identifier) @name) @definition @kind.type)
+
+((function_item name: (identifier) @name) @definition @kind.function)
+((struct_item name: (type_identifier) @name) @definition @kind.struct)
+((enum_item name: (type_identifier) @name) @definition @kind.enum)
+((trait_item name: (type_identifier) @name) @definition @kind.interface)
+((mod_item name: (identifier) @name) @definition @kind.module)
+((macro_definition name: (identifier) @name) @definition @kind.macro)
+((const_item name: (identifier) @name) @definition @kind.constant)
+((static_item name: (identifier) @name) @definition @kind.constant)
+((type_item name: (type_identifier) @name) @definition @kind.type)
+"#;
+
+const RUST_IMPORT_QUERY: &str = r#"
+((use_declaration
+  argument: (scoped_use_list
+    path: (identifier) @path)) @definition)
+((use_declaration
+  argument: (scoped_identifier
+    path: (_) @path
+    name: (identifier) @item)) @definition)
+((use_declaration
+  argument: (identifier) @path) @definition)
+"#;
+
+const PYTHON_SYMBOL_QUERY: &str = r#"
+((function_definition name: (identifier) @name) @definition @kind.function)
+((class_definition name: (identifier) @name) @definition @kind.class)
+"#;
+
+const PYTHON_IMPORT_QUERY: &str = r#"
+((import_statement name: (dotted_name) @path) @definition)
+((import_from_statement module_name: (dotted_name) @path name: (dotted_name) @item) @definition)
+((import_from_statement module_name: (relative_import) @path name: (dotted_name) @item) @definition)
+"#;
+
+const TS_SYMBOL_QUERY: &str = r#"
+((function_declaration name: (identifier) @name) @definition @kind.function)
+((class_declaration name: (type_identifier) @name) @definition @kind.class)
+((interface_declaration name: (type_identifier) @name) @definition @kind.interface)
+((method_definition name: (property_identifier) @name) @definition @kind.method)
+((type_alias_declaration name: (type_identifier) @name) @definition @kind.type)
+((lexical_declaration
+  (variable_declarator name: (identifier) @name value: [(arrow_function) (function_expression)])) @definition @kind.function)
+"#;
+
+const TS_IMPORT_QUERY: &str = r#"
+((import_statement source: (string (string_fragment) @path)) @definition)
+((import_clause (named_imports (import_specifier name: (identifier) @item))) @definition)
+"#;
+
+const GO_SYMBOL_QUERY: &str = r#"
+((function_declaration name: (identifier) @name) @definition @kind.function)
+((method_declaration name: (field_identifier) @name) @definition @kind.method)
+((type_declaration (type_spec name: (type_identifier) @name)) @definition @kind.type)
+"#;
+
+const GO_IMPORT_QUERY: &str = r#"
+((import_spec path: (interpreted_string_literal) @path) @definition)
+"#;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -934,5 +1167,44 @@ class User:
         assert!(symbols
             .iter()
             .any(|s| s.name == "User" && s.kind == SymbolKind::Class));
+    }
+
+    #[test]
+    fn test_extract_symbols_rust_with_documentation() {
+        let lsp = MolecularLsp::new();
+        let code = r#"
+/// Starts the app
+pub fn boot() {}
+
+pub struct App {}
+"#;
+
+        let symbols = lsp.extract_symbols("rust", code);
+        let boot = symbols.iter().find(|symbol| symbol.name == "boot").unwrap();
+        let app = symbols.iter().find(|symbol| symbol.name == "App").unwrap();
+
+        assert_eq!(boot.kind, SymbolKind::Function);
+        assert_eq!(boot.documentation.as_deref(), Some("/// Starts the app"));
+        assert_eq!(app.kind, SymbolKind::Struct);
+    }
+
+    #[test]
+    fn test_extract_imports_rust() {
+        let lsp = MolecularLsp::new();
+        let code = "use std::collections::HashMap;\nuse crate::models::User;";
+        let imports = lsp.extract_imports("rust", code);
+
+        assert!(imports.iter().any(|import| import.path.contains("std::collections")));
+        assert!(imports.iter().any(|import| import.path.contains("crate::models")));
+    }
+
+    #[test]
+    fn test_extract_imports_python() {
+        let lsp = MolecularLsp::new();
+        let code = "from core.services import runner\nimport asyncio";
+        let imports = lsp.extract_imports("python", code);
+
+        assert!(imports.iter().any(|import| import.path == "core.services"));
+        assert!(imports.iter().any(|import| import.path == "asyncio"));
     }
 }

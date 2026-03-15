@@ -471,6 +471,7 @@ fn main() {
             // ============ LSP Operations ============
             commands::lsp::detect_language,
             commands::lsp::extract_symbols,
+            commands::lsp::extract_imports,
             commands::lsp::get_completions,
             commands::lsp::get_diagnostics,
             commands::lsp::lsp_list_supported_languages,
