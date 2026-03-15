@@ -48,7 +48,7 @@ export function TestRunnerPanel() {
   const runTests = async () => {
     setRunning(true);
     try {
-      await invoke('run_project_tests', { projectPath: '.' });
+      await invoke('run_tests', { projectPath: '.', customCommand: null, testFilter: null });
     } catch (err) {
       console.error('Test run failed:', err);
       setRunning(false);

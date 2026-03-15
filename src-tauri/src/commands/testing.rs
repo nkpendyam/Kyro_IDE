@@ -162,11 +162,18 @@ pub async fn run_tests(
     let _ = app.emit(
         "test-run-complete",
         serde_json::json!({
+            "suite": project_path,
             "total": result.total,
             "passed": result.passed,
             "failed": result.failed,
             "success": result.success,
             "duration_ms": result.duration_ms,
+            "results": result.test_results.iter().map(|t| serde_json::json!({
+                "name": t.name,
+                "passed": matches!(t.status, TestStatus::Passed),
+                "duration_ms": t.duration_ms,
+                "output": t.message.clone().unwrap_or_default(),
+            })).collect::<Vec<_>>(),
         }),
     );
 

@@ -64,8 +64,19 @@ export function FirstRunExperience({ onComplete }: FirstRunExperienceProps) {
 
   // Fetch available models
   useEffect(() => {
-    invoke<ModelInfo[]>('list_local_models')
-      .then(setModels)
+    invoke<{ id: string; name: string; size_mb: number; description: string; quantization: string; min_ram_gb: number }[]>('list_available_models')
+      .then((catalog) => {
+        setModels(catalog.map((m) => ({
+          id: m.id,
+          name: m.name,
+          size_mb: m.size_mb,
+          description: m.description,
+          downloaded: m.description.startsWith('[Downloaded]'),
+          loaded: false,
+          quantization: m.quantization,
+          min_memory_tier: m.min_ram_gb <= 4 ? 'low' : m.min_ram_gb <= 8 ? 'medium' : 'high',
+        })));
+      })
       .catch(console.error);
   }, []);
 
@@ -87,9 +98,9 @@ export function FirstRunExperience({ onComplete }: FirstRunExperienceProps) {
     // Listen for real progress events from backend
     let unlisten: UnlistenFn | null = null;
     try {
-      unlisten = await listen<{ model: string; progress: number; status: string }>('model-download-progress', (event) => {
-        setDownloadProgress(event.payload.progress);
-        if (event.payload.status === 'complete') {
+      unlisten = await listen<{ model_id: string; percent: number; state: string }>('model-download-progress', (event) => {
+        setDownloadProgress(event.payload.percent);
+        if (event.payload.state === 'Complete') {
           setDownloadProgress(100);
           setTimeout(() => {
             setCurrentStep(4);
@@ -98,7 +109,7 @@ export function FirstRunExperience({ onComplete }: FirstRunExperienceProps) {
         }
       });
 
-      await invoke('download_model', { modelName: selectedModel });
+      await invoke('download_model', { modelId: selectedModel });
 
       // If no events fired (e.g., model already cached), complete immediately
       setDownloadProgress(100);
@@ -108,20 +119,10 @@ export function FirstRunExperience({ onComplete }: FirstRunExperienceProps) {
       }, 500);
     } catch (e) {
       console.error('Failed to download model:', e);
-      // Fallback: try load_model instead
-      try {
-        await invoke('load_model', { modelName: selectedModel });
-        setDownloadProgress(100);
-        setTimeout(() => {
-          setCurrentStep(4);
-          setIsComplete(true);
-        }, 500);
-      } catch {
-        // Still allow completion
-        setDownloadProgress(100);
-        setCurrentStep(4);
-        setIsComplete(true);
-      }
+      // Still allow completion even if download fails
+      setDownloadProgress(100);
+      setCurrentStep(4);
+      setIsComplete(true);
     } finally {
       setIsDownloading(false);
       unlisten?.();
@@ -132,11 +133,11 @@ export function FirstRunExperience({ onComplete }: FirstRunExperienceProps) {
   const completeSetup = async () => {
     try {
       await invoke('save_first_run_complete');
-      onComplete();
-    } catch (e) {
-      console.error('Failed to complete setup:', e);
-      onComplete(); // Continue anyway
+    } catch {
+      // Persist locally as fallback
+      localStorage.setItem('kyro-first-run-done', 'true');
     }
+    onComplete();
   };
 
   // Render step content
