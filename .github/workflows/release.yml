@@ -38,7 +38,7 @@ jobs:
             artifact_name: kyro-ide-linux-x64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Determine release channel
         id: channel
@@ -84,7 +84,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
 
@@ -134,7 +134,7 @@ jobs:
 
       - name: Import Apple code-signing certificates (optional)
         if: matrix.os == 'macos-14' && env.APPLE_CERTIFICATE_BASE64 != '' && env.APPLE_CERTIFICATE_PASSWORD != ''
-        uses: apple-actions/import-codesign-certs@v3
+        uses: apple-actions/import-codesign-certs@v6
         with:
           p12-file-base64: ${{ env.APPLE_CERTIFICATE_BASE64 }}
           p12-password: ${{ env.APPLE_CERTIFICATE_PASSWORD }}
@@ -184,7 +184,7 @@ jobs:
 
       - name: Upload release artifact (Windows)
         if: matrix.os == 'windows-2022'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: |
@@ -193,20 +193,20 @@ jobs:
 
       - name: Upload release artifact (macOS)
         if: matrix.os == 'macos-14'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: src-tauri/target/release/bundle/dmg/*.dmg
 
       - name: Upload release artifact (Linux)
         if: matrix.os == 'ubuntu-22.04'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: src-tauri/target/release/bundle/appimage/*.AppImage
 
       - name: Upload artifact checksums
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}-checksums
           path: checksums/*
