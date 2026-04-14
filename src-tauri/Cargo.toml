@@ -152,7 +152,7 @@ ropey = "1.6"  # UTF-8 text rope (from cessen/ropey)
 # ============ Additional Crypto ============
 blake3 = "1.5"
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
-rand = "0.8"
+rand = "0.9"
 
 # ============ JWT Authentication ============
 # Using jsonwebtoken (from Keats/jsonwebtoken) - pure Rust, no BoringSSL/cmake needed
