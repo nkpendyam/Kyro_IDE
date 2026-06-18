@@ -156,7 +156,7 @@ rand = "0.8"
 
 # ============ JWT Authentication ============
 # Using jsonwebtoken (from Keats/jsonwebtoken) - pure Rust, no BoringSSL/cmake needed
-jsonwebtoken = "9.3"
+jsonwebtoken = "10.3"
 
 # ============ Password Hashing ============
 argon2 = "0.5"  # Argon2 password hashing (recommended)
